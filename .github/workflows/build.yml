@@ -68,7 +68,7 @@ jobs:
 
   build-xnu:
     name: Build 4K XNU Kernel & Device Tree (iPadOS 17.7.11)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 180
     steps:
       - name: Check out UniXNU-xun
