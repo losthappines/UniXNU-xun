@@ -45,9 +45,13 @@ jobs:
       - name: Scaffold & Verify xunPkg in Mu-Silicium
         run: |
           mkdir -p Mu-Silicium/Platforms/Xiaomi/xunPkg
-          # Sync verified xunPkg definitions from device tree or workspace
+          mkdir -p Mu-Silicium/Resources/Configs
+          mkdir -p Mu-Silicium/Resources/DTBs
           if [ -d "UniXNU-xun/uefi/xunPkg" ]; then
             cp -r UniXNU-xun/uefi/xunPkg/* Mu-Silicium/Platforms/Xiaomi/xunPkg/
+          fi
+          if [ -d "UniXNU-xun/uefi/Resources" ]; then
+            cp -r UniXNU-xun/uefi/Resources/* Mu-Silicium/Resources/
           fi
           export UNIXNU_UEFI="$GITHUB_WORKSPACE/Mu-Silicium"
           python3 UniXNU-xun/scripts/check-xun.py
