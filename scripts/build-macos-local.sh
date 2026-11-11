@@ -64,19 +64,23 @@ fi
 echo "--> Running eMMC 5.1 root storage verification..."
 python3 "${DEVICE_DIR}/drivers/XunEmmc/tests/check_xun_emmc_root.py"
 
-# 5. Check Mu-Silicium Preflight
+# 5. Build UEFI Firmware (SILICIUM_UEFI.fd)
 if [ -d "${MU_DIR}" ]; then
-    echo "--> Running Mu-Silicium preflight..."
+    echo "--> Building Mu-Silicium UEFI firmware volume..."
     export UNIXNU_UEFI="${MU_DIR}"
     python3 "${DEVICE_DIR}/scripts/check-xun.py"
+    pushd "${UNIXNU_DIR}" >/dev/null
+    python3 unixnu build firmware --uefi "${MU_DIR}" -D "${DEVICE_DIR}"
+    popd >/dev/null
 fi
 
-# 6. Build Kernel with UniXNU
+# 6. Build 4K XNU Kernel and Package Payload
 if [ -d "${UNIXNU_DIR}" ]; then
     echo "--> Configuring and building 4K XNU kernel..."
     pushd "${UNIXNU_DIR}" >/dev/null
     python3 unixnu defconfig xun_defconfig -D "${DEVICE_DIR}"
     python3 unixnu build kernel -D "${DEVICE_DIR}"
+    python3 unixnu build payload -D "${DEVICE_DIR}" || true
     popd >/dev/null
 fi
 
