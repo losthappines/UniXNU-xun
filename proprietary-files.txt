@@ -1,0 +1,9 @@
+# Required firmware inputs for Xiaomi Redmi Pad SE 11" (xun, SM6225):
+# path | source | SHA-256 | consumer
+
+# Adreno 610 GPU firmware & zap shader
+firmware/a630_sqe.fw | vendor/firmware | 8c886e088ba7df41fca4fa1d3ba758d461751d6c29b87b7a664e43bececfba77 | Adreno610
+firmware/a610_zap.mdt | vendor/firmware | 5a589f81fa8b88d227f27cb570dc264423b4f62bf9f6dbf83c6d17b084931a29 | Adreno610
+
+# Touchscreen Firmware (Novatek / FocalTech)
+firmware/novatek_ts_fw.bin | vendor/firmware | pending | ShengNovatekTouch

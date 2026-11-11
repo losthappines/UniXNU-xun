@@ -1,0 +1,61 @@
+# Kernel configuration of the Xiaomi Redmi Pad SE 11" (xun, SM6225):
+# generic CPU, interrupt, timer and platform expert path, source corecrypto and pthread providers,
+# SoftwareAES, 4 KiB code-signing hash cache, and NativeEmmc root storage on sdhci@4744000.
+
+CONFIG_XNU_SOURCE_CORECRYPTO14=y
+CONFIG_XNU_SOURCE_PTHREAD=y
+CONFIG_XNU_ARM_DT_PLATFORM=y
+CONFIG_XNU_ARMCPU=y
+CONFIG_XNU_NATIVE_AES=y
+
+# NativeEmmc: Qualcomm SDHCI MSM (sdhci@4744000) eMMC 5.1 block class with VerifiedRoot owner policy
+CONFIG_XNU_NATIVE_EMMC=y
+CONFIG_XNU_NATIVE_EMMC_ARCHIVE="{tree}/build/xun-emmc/libXunEmmc.a"
+
+# Verified variant: its root authorization query is what the owner chain below calls.
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK=y
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE="{tree}/build/virtio-mmio-block-verified/libVirtioMmioBlock.a"
+
+# The Data seed: a packed APFS scratch volume published as a RAM block device.
+CONFIG_XNU_NATIVE_RAM_BLOCK=y
+
+# Owner root chain: audit/trust the verified root, mount SystemOS cryptex as cache carrier,
+# publish boot manifest, mount scratch Data volume.
+CONFIG_XNU_VERIFIED_ROOT_PROBE=y
+CONFIG_XNU_OWNER_ROOT_AUDIT=y
+CONFIG_XNU_OWNER_ROOT_TRUST=y
+CONFIG_XNU_OWNER_CACHE_MOUNT=y
+CONFIG_XNU_OWNER_CACHE_STARTUP=y
+CONFIG_XNU_OWNER_BOOT_MANIFEST=y
+CONFIG_XNU_OWNER_DATA_MOUNT=y
+CONFIG_XNU_OWNER_UNION_SYSTEMOS=y
+
+# The SystemOS volume of the signed policy and the Data seed volume of the payload.
+CONFIG_XNU_OWNER_CACHE_VOLUME_UUID="8846FE78-2910-4297-AF97-D59BB6F8FC16"
+CONFIG_XNU_OWNER_DATA_VOLUME_UUID="73F1FA24-4189-446D-96D4-FB6324EBE955"
+CONFIG_XNU_TRUST_CACHE_RUNTIME=y
+CONFIG_XNU_NATIVE_CS_HASH_CACHE=y
+CONFIG_XNU_DT_PANIC_REGION=y
+CONFIG_XNU_NATIVE_ARCH_TIMER=y
+
+# SM6225 Kryo 265 cores (Cortex-A73 Gold, Cortex-A53 Silver) are ARMv8.0 and lack PAN.
+CONFIG_XNU_NATIVE_PAN=n
+CONFIG_XNU_SHENG_PMGR=y
+
+# On-screen bring-up progress bars (arm_vm_init, bsd_init, root authentication, mount stages)
+CONFIG_XNU_BOOT_PROGRESS=y
+
+CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
+CONFIG_XNU_BUILD_ARCHIVES=y
+
+CONFIG_XNU_EXTRA_LD_ARCHIVES="{tree}/build/link-stubs/libLinkStubs.a"
+CONFIG_XNU_VERIFIED_ROOT_ARCHIVE="{tree}/build/verified-root-key/libVerifiedRootKey.a"
+CONFIG_XNU_NATIVE_MOBILE_DISPLAY=n
+CONFIG_XNU_ARMVIRT_PLATFORM=n
+
+# GOP Framebuffer / NativeLegacyDisplay on continuous splash buffer at 0x5c000000
+CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y
+
+# Adreno 610 GPU kernel driver
+CONFIG_XNU_NATIVE_ADRENO=y
+CONFIG_XNU_NATIVE_ADRENO_ARCHIVE="{tree}/build/adreno610/libAdreno610.a"

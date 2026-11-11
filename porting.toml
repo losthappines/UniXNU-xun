@@ -1,0 +1,359 @@
+schema_version = 1
+
+[device]
+name = "xun"
+soc = "SM6225"
+os_profile = "ipados-17.7.11-21H461"
+summary = "Xiaomi Redmi Pad SE 11\" (xun) iPadOS 17.7.11 port on Snapdragon 680 (SM6225, Adreno 610, eMMC 5.1)"
+
+[[area]]
+id = "configuration"
+status = "planned"
+components = ["ArmDTPlatform", "ArmCpu", "SoftwareAES", "XnuPrelink", "DarwinBoot"]
+paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore"]
+inputs = [
+  "Device: Xiaomi Redmi Pad SE 11\" (23073RPBFG, xun)",
+  "SoC: Qualcomm Snapdragon 680 4G (SM6225 / khaje / divar)",
+  "CPU: 4x Kryo 265 Silver (Cortex-A53 @ 1.9 GHz) + 4x Kryo 265 Gold (Cortex-A73 @ 2.4 GHz)",
+  "Target OS: iPadOS 17.7.11 (21H461), iPad7,3 arm64 userland",
+  "Extracted base DTB: vendor_boot.img_dtb_0.dtb (Qualcomm Technologies, Inc. Khaje SoC)",
+  "Extracted board DTBO: dtbo.img_dtb_45.dtb (Qualcomm Technologies, Inc. KHAJE IDP nopmi xun)"
+]
+configuration = [
+  "schema_version = 1",
+  "board.name = 'xun'",
+  "board.soc = 'SM6225'",
+  "board.os_profile = 'ipados-17.7.11-21H461'"
+]
+procedure = [
+  "Cloned UniXNU and UniXNU-tb128fu baseline repos",
+  "Scaffolded UniXNU-xun repository",
+  "Extracted and parsed DTB from official HyperOS fastboot images (vendor_boot.img and dtbo.img)"
+]
+findings = [
+  "SM6225 on xun uses eMMC 5.1 (sdhci@4744000) instead of UFS (tb128fu), requiring NativeEmmc driver",
+  "Kryo 265 Silver cores lack 16 KiB MMU granule, requiring 4 KiB kernel page tables and CONFIG_XNU_NATIVE_CS_HASH_CACHE"
+]
+completion = [
+  "Stage 1 baseline initialized and board configuration verified against device tree"
+]
+limits = [
+  "Initial bringup underway"
+]
+next_action = [
+  "Complete board.toml and xun_defconfig parameters"
+]
+evidence = []
+
+[[area]]
+id = "firmware"
+status = "planned"
+components = ["DarwinBoot"]
+paths = ["proprietary-files.txt", "scripts/*firmware*"]
+inputs = [
+  "Stock ABL ELF from xun fastboot ROM",
+  "Mu-Silicium xunPkg UEFI port adapted from tb128fuPkg"
+]
+configuration = [
+  "SimpleFbDxe framebuffer on cont_splash_region at 0x5c000000",
+  "UniXNU application GUID 9B665204-A133-47A2-9396-9E2B370A4E25 first boot option"
+]
+procedure = [
+  "Build Mu-Silicium UEFI xunPkg with SimpleFbDxe and DarwinBoot"
+]
+findings = [
+  "Stock ABL download buffer size restriction (< 57 MiB fastboot boot buffer)"
+]
+completion = [
+  "UEFI boots and displays UniXNU boot menu via SimpleFbDxe"
+]
+limits = [
+  "Awaiting UEFI build"
+]
+next_action = [
+  "Scaffold xunPkg in Mu-Silicium"
+]
+evidence = []
+
+[[area]]
+id = "cpu"
+status = "planned"
+components = ["ArmCpu", "ArmDTPlatform"]
+paths = ["package/CpuFreq*", "scripts/*armcpu*", "dts/xun.dts", "scripts/make-xun-adt.py"]
+inputs = [
+  "4x Silver cores MPIDR 0x0-0x3 (Cortex-A53)",
+  "4x Gold cores MPIDR 0x100-0x103 (Cortex-A73)",
+  "GICv3 distributor at 0x0f200000, redistributors at 0x0f300000 (stride 0x20000)",
+  "Virtual timer INTID 19 at 19.2 MHz (ARCH timer)"
+]
+configuration = [
+  "armcpu-timer-intid=19",
+  "armcpu-spi-ipi=1",
+  "armcpu-spi-ipi-base=536",
+  "armcpu-self-ipi=1"
+]
+procedure = [
+  "Configure Apple Device Tree CPU nodes and PSCI SMC conduit"
+]
+findings = [
+  "Silver cores require 4 KiB hardware page-table patches in XNU"
+]
+completion = [
+  "All 8 cores bootstrap into bsd_init"
+]
+limits = [
+  "Single core bringup first (cpus=1)"
+]
+next_action = [
+  "Generate xun .adt"
+]
+evidence = []
+
+[[area]]
+id = "memory"
+status = "planned"
+components = []
+paths = ["dts/**", "board.toml"]
+inputs = [
+  "DRAM base: 0x40000000",
+  "cont_splash_region: base 0x5c000000, size 0x00f00000 (15 MiB)",
+  "ramoops/pstore: base 0x5d000000, size 0x00200000 (2 MiB, record 256K, console 512K, pmsg 1M)",
+  "smem_region: base 0x46000000",
+  "gpu_region: base 0x55B15000"
+]
+configuration = [
+  "payload.dram_size = '0x180000000'",
+  "reserved-memory carves preserved across handoff"
+]
+procedure = [
+  "Extracted memory carves from live DTB"
+]
+findings = [
+  "Contiguous splash buffer verified at 0x5c000000 (size 15 MiB)"
+]
+completion = [
+  "All memory carve-outs recorded"
+]
+limits = ["Initial bring-up for xun SM6225"]
+next_action = [
+  "Integrate carve-outs into xun memory map"
+]
+evidence = []
+
+[[area]]
+id = "storage"
+status = "planned"
+components = ["NativeEmmc", "VirtioMmioBlock"]
+paths = ["drivers/NativeEmmc", "board.toml"]
+inputs = [
+  "Qualcomm SDHCI MSM controller at 0x04744000 (sdhci@4744000)",
+  "userdata partition: start LBA 20129584 (0x1332730), sector size 512 bytes"
+]
+configuration = [
+  "first_lba = 0x1332730",
+  "lba_bytes = 512",
+  "driver: NativeEmmc"
+]
+procedure = [
+  "Map NativeEmmc driver to sdhci@4744000 base and interrupts"
+]
+findings = [
+  "eMMC 5.1 uses 512-byte sectors instead of UFS 4096-byte sectors"
+]
+completion = [
+  "NativeEmmc mounts OS and SystemOS volumes from userdata"
+]
+limits = [
+  "Host QEMU root-path test prior to flashing"
+]
+next_action = [
+  "Scaffold NativeEmmc configuration"
+]
+evidence = []
+
+[[area]]
+id = "display"
+status = "planned"
+components = ["GopFramebuffer"]
+paths = ["package/*Display*", "scripts/*display*", "scripts/*gop*"]
+inputs = [
+  "Panel resolution: 1200x1920 (portrait) / 1920x1200 (landscape), 90 Hz",
+  "Panel controller: DSI video mode",
+  "Framebuffer base: 0x5c000000 (cont_splash_region)",
+  "Format: 32 bpp B8G8R8A8"
+]
+configuration = [
+  "SimpleFbDxe GOP resolution 1200x1920",
+  "sheng-vsync=60 fixed workloop"
+]
+procedure = [
+  "Extracted panel timing and cont_splash address from dtbo"
+]
+findings = [
+  "Panel timings verified: panel-width=1200, panel-height=1920, 90Hz command states present"
+]
+completion = [
+  "cont_splash scanout parameters verified"
+]
+limits = ["Initial bring-up for xun SM6225"]
+next_action = [
+  "Verify boot-green.img test pattern"
+]
+evidence = []
+
+[[area]]
+id = "input"
+status = "planned"
+components = ["ShengHidInput"]
+paths = ["package/*Touch*", "package/*Button*"]
+inputs = [
+  "Touch controller: FocalTech / Novatek NVT-ts on QUP SPI/I2C (slave 0x62)",
+  "Touch IRQ GPIO: 80 (0x50), Reset GPIO: 86 (0x56)",
+  "Hardware keys: PM6125 SPMI PON resin/kpdpwr"
+]
+configuration = [
+  "Touch coordinate scaling: 1200x1920 Digitizer HID reports"
+]
+procedure = [
+  "Adapt ShengHidInput for xun touch GPIOs and SPMI buttons"
+]
+findings = [
+  "FocalTech and Novatek compatible strings present in overlay fragment@43 and @44"
+]
+completion = [
+  "Touch and power/volume buttons operational in SpringBoard"
+]
+limits = ["Initial bring-up for xun SM6225"]
+next_action = [
+  "Write touch driver mapping"
+]
+evidence = []
+
+[[area]]
+id = "gpu"
+status = "planned"
+components = ["Adreno610", "AdrenoMetal"]
+paths = ["package/*Gpu*", "scripts/*adreno*", "scripts/*turnip*"]
+inputs = [
+  "GPU: Qualcomm Adreno 610 (a610 / a6xx)",
+  "Firmware: a630_sqe.fw + zap shader",
+  "IOMMU: kgsl-smmu@0x59a0000",
+  "Base address: 0x05900000"
+]
+configuration = [
+  "tb128fu-gpu=9 (SM6225 Adreno 610 driver)",
+  "Turnip freedreno Vulkan + AdrenoMetal bundle"
+]
+procedure = [
+  "Integrate Adreno 610 kernel driver and Mesa Turnip userspace bundle"
+]
+findings = [
+  "SM6225 Adreno 610 baseline is identical to tb128fu"
+]
+completion = [
+  "QuartzCore hardware composition active without CPU fallback"
+]
+limits = ["Initial bring-up for xun SM6225"]
+next_action = [
+  "Extract GPU firmware blobs into proprietary-files"
+]
+evidence = []
+
+[[area]]
+id = "network"
+status = "planned"
+components = []
+paths = ["board.toml"]
+inputs = ["WCN3990 WiFi/BT"]
+configuration = ["Initial bring-up for xun SM6225"]
+procedure = ["Initial bring-up for xun SM6225"]
+findings = ["Initial bring-up for xun SM6225"]
+completion = ["Network bringup deferred to post-graphics"]
+limits = ["Deferred"]
+next_action = ["Stage post-GPU"]
+evidence = []
+
+[[area]]
+id = "audio"
+status = "planned"
+components = []
+paths = ["board.toml"]
+inputs = ["Qualcomm LPASS / WCD937x codec"]
+configuration = ["Initial bring-up for xun SM6225"]
+procedure = ["Initial bring-up for xun SM6225"]
+findings = ["Initial bring-up for xun SM6225"]
+completion = ["Audio bringup deferred to post-graphics"]
+limits = ["Deferred"]
+next_action = ["Stage post-GPU"]
+evidence = []
+
+[[area]]
+id = "power"
+status = "planned"
+components = []
+paths = ["package/*PlatformPower*"]
+inputs = ["PM6125 / PMK8350 PMICs, RPM GLINK"]
+configuration = ["Initial bring-up for xun SM6225"]
+procedure = ["Initial bring-up for xun SM6225"]
+findings = ["Initial bring-up for xun SM6225"]
+completion = ["PMIC rail votes and battery reporting"]
+limits = ["Deferred"]
+next_action = ["Stage post-GPU"]
+evidence = []
+
+[[area]]
+id = "packaging"
+status = "planned"
+components = ["XnuPrelink", "DarwinBoot"]
+paths = ["scripts/*"]
+inputs = [
+  "iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw (iPad7,3)",
+  "Fastboot boot size threshold (< 57 MiB)"
+]
+configuration = [
+  "payload.volume = 'XUNESP'",
+  "payload.size_mib = 72"
+]
+procedure = [
+  "Configuring boot payload packaging scripts"
+]
+findings = [
+  "Stock fastboot boot buffer restriction requires keeping payload compact"
+]
+completion = [
+  "Packaging scripts produce valid xun boot images"
+]
+limits = ["Initial bring-up for xun SM6225"]
+next_action = [
+  "Validate package check script"
+]
+evidence = []
+
+[[area]]
+id = "diagnostics"
+status = "planned"
+components = []
+paths = ["scripts/check-*", "NOTES.md", "porting.toml"]
+inputs = [
+  "Retained kernel console ring",
+  "ramoops at 0x5d000000"
+]
+configuration = [
+  "debug=0x14e",
+  "serial=3",
+  "boot-progress=2"
+]
+procedure = [
+  "Setup logging and diagnostics scripts"
+]
+findings = [
+  "ramoops base confirmed at 0x5d000000"
+]
+completion = [
+  "Diagnostics tracking active in porting.toml and NOTES.md"
+]
+limits = ["Initial bring-up for xun SM6225"]
+next_action = [
+  "Run porting-record check"
+]
+evidence = []

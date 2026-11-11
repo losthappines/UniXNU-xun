@@ -4,10 +4,14 @@
 # UniXNU on a TB128FU yet. The memory banks, [userdata] and every SoC address were read from the running device tree.
 
 [board]
-name = "tb128fu"
+name = "xun"
 soc = "SM6225"
-description = "Lenovo Xiaoxin Pad 2022 (TB128FU)"
-kit = "tb128fu"                    # a package/ of this repository would appear as kits/tb128fu in the build tree
+os_profile = "ipados-17.7.11-21H461"
+description = "Xiaomi Redmi Pad SE 11\" (xun)"
+kit = "xun"
+
+[components]
+include = ["ArmDTPlatform", "ArmCpu", "SoftwareAES", "XnuPrelink", "DarwinBoot"]                    # a package/ of this repository would appear as kits/tb128fu in the build tree
 
 # The same target OS image as UniXNU-sheng: the unchanged iPad7,1 iPadOS 17.7.11 restore image.
 [ipsw]
@@ -28,17 +32,17 @@ fetch = ["KernelCache", "DeviceTree", "StaticTrustCache", "Cryptex1,SystemTrustC
 # userdata" writes the image for it; flashing it erases Android's data. The windows are those of UniXNU-sheng: the same
 # target image.
 [userdata]
-first_lba = 0x222f31
-last_lba = 0x1c457fa
-lba_bytes = 4096
+first_lba = 0x1332730
+last_lba = 0xe8fffff
+lba_bytes = 512
 windows = [
   { name = "OS", component = "OS" },
   { name = "SystemOS", component = "Cryptex1,SystemOS" },
 ]
 
 [kernel]
-defconfig = "tb128fu_defconfig"
-# Archive builders of the kernel step, in order; the ones tb128fu_defconfig links. build-arm-driver.py is UniXNU's generic
+defconfig = "xun_defconfig"
+# Archive builders of the kernel step, in order; the ones xun_defconfig links. build-arm-driver.py is UniXNU's generic
 # driver builder, which finds each component in UniXNU's components.toml.
 archives = [
   "build-corecrypto-14.py",
@@ -46,8 +50,8 @@ archives = [
   "build-arm-driver.py ArmDTPlatform",
   "build-arm-driver.py ArmCpu",
   "build-arm-driver.py SoftwareAES",
-  # drivers/Tb128fuUfs: the SM6225 host with the verified block device and root publication.
-  "build-arm-driver.py Tb128fuUfs --sm6225",
+  # NativeEmmc: Qualcomm SDHCI MSM (sdhci@4744000) for eMMC 5.1
+  "build-arm-driver.py NativeEmmc --sm6225",
   "build-arm-driver.py VirtioMmioBlock --verified-root",
   "build-virtio-mmio-bindings.py --component VirtioMmioBlock --directory build/virtio-mmio-block-verified",
   "build-arm-driver.py RamBlock",
@@ -114,10 +118,10 @@ roots = [
 # instead of separable vendor DXE modules, so the build uses the Mu driver set only (SimpleFbDxe on the ABL's
 # cont_splash_region); there is no Binaries/tb128fu.
 [firmware]
-config = "tb128fu"                 # Resources/Configs/tb128fu.toml in the Mu-Silicium checkout (--uefi or UNIXNU_UEFI)
-dsc = "Platforms/Lenovo/tb128fuPkg/tb128fu.dsc"
-fd = "Build/tb128fuPkg/{target}_CLANGPDB/FV/SILICIUM_UEFI.fd"
-preflight = ["scripts/check-tb128fu.py"]   # reads the checkout from UNIXNU_UEFI
+config = "xun"                 # Resources/Configs/xun.toml in the Mu-Silicium checkout (--uefi or UNIXNU_UEFI)
+dsc = "Platforms/Xiaomi/xunPkg/xun.dsc"
+fd = "Build/xunPkg/{target}_CLANGPDB/FV/SILICIUM_UEFI.fd"
+preflight = ["scripts/check-xun.py"]   # reads the checkout from UNIXNU_UEFI
 submodules = ["Binaries", "Common/Mu", "Common/Mu_OEM_Sample", "Silicium-ACPI", "Silicon/Silicium/OpensslPkg/Library/OpensslLib/openssl"]
 # Masks a GIC interrupt that has no handler instead of taking it forever (found on sheng with a leftover IPCC interrupt).
 patches = ["Resources/MuPatches/Gic-Spurious.patch"]
@@ -142,47 +146,26 @@ packages = [
 ENABLE_SECUREBOOT = "1"
 MEMORY_PROTECTION = "TRUE"
 SHIP_MODE = "FALSE"
-BUILDID_STRING = "tb128fu-research"
+BUILDID_STRING = "xun-research"
 
-# Image parameters come from Resources/Configs/tb128fu.toml of the checkout. Resources/DTBs/tb128fu.dtb carries
+# Image parameters come from Resources/Configs/xun.toml of the checkout. Resources/DTBs/xun.dtb carries
 # /reserved-memory/cont_splash_region@5c000000, so no [[bootimg.dtb_node]] is added.
 
 # The ramdisk of the boot image: a FAT volume with the UniXNU config, the kernel, its device tree and the optional
 # trust cache and Data seed. DarwinBoot is part of the firmware volume.
-#
-# The kernel is the one tb128fu_defconfig builds. It has no storage, Data or display driver yet, so the expected end is
-# the root mount, with the panic screen on the frame buffer.
 [payload]
-volume = "TB128FUESP"
-# The ABL's fastboot boot buffer is smaller than the 96 MiB boot_a partition:
-# 192 MiB and 89 MiB ramdisks both made `fastboot boot` return to fastboot,
-# while a 1.2 MiB image started; flashed to boot_a, a 57 MiB payload starts. 72 MiB holds the 52.6 MiB kernel, the packed
-# Data seed, the owner trust bundle and the 12.1 MiB GPU addon (make-gpu-addon.py: plugin, Turnip, adrenoprobed).
+volume = "XUNESP"
 size_mib = 72
-# UniXNU menu countdown. 10 s gave the first hardware test time to see the menu; during the reset-probe bisection it is
-# 2 s, because a probe reset boots the image again until slot a runs out of its 7 retries and ABL stops in fastboot.
 timeout = 2
 loader = "firmware"
-title = "tb128fu first boot: source 4K XNU to the panic screen"
-# The TB128FU /memory banks are 0x40000000+0x3cc00000, 0x80000000+0x40000000 and 0xc0000000+0x100000000. XNU takes
-# dram-base and dram-size as one range (is_dram_addr, which only picks the attribute of device mappings), so it spans
-# from 0x40000000 to the end of the last bank, across the 0x7cc00000..0x80000000 hole.
+title = "xun first boot: source 4K XNU to the panic screen"
+# DRAM base is 0x40000000. XNU spans from 0x40000000 across contiguous free DRAM.
 dram_size = "0x180000000"
 skip_setup_tool = "scripts/seed-data-skip-setup.py"
-# No input device yet: without these SpringBoard preferences iPadOS turns the display off about 30 s after it starts and
-# puts the system to sleep, which ArmCpu does not support (as on UniXNU-qemu). A changed seed restarts the Data overlay.
-# --plain-framebuffer: the render server's 8-bit, uncompressed framebuffer for the Metal plugin of the GPU addon.
 skip_setup_args = ["--no-auto-dim", "--plain-framebuffer"]
-# The panic screen does not fit next to a stage 3/4 reset probe (0x45 bytes short): set it to false while
-# entry_probe_reset_delay is nonzero.
 panic_screen = true
-# Diagnostic: reset this many seconds after the MMU is enabled (stage 3). A reset proves the CPU got through the
-# MMU enable; no reset means it hangs there. 0/absent keeps --no-reset (stages 3 and 4 off).
 entry_probe_reset_delay = 0
-# Diagnostic: with a reset delay, reset after the Nth call to this symbol in entry_probe_reset_in (default _arm_init,
-# first call) instead of right after the MMU enable (stage 4 in place of stage 3). Bisects where the boot stops.
 entry_probe_reset_after = "_arm_vm_init"
-# true: reset at that call site instead, without making the call (did the boot reach it?).
 entry_probe_reset_before = false
 # The original static/System trust caches of the same IPSW, as accepted by UniXNU-sheng.
 trust_cache_sha256 = [
@@ -218,13 +201,13 @@ kernel_args = [
   # the userdata policy directory; diagnostics turn a refused policy into a screen report. 2 also times READ(10), before the root
   # is published, over the first 64 MiB of userdata in 128 KiB commands and 512 spread 4 KiB ones (the boot log's [ufs] rows,
   # with the link's gear and lanes and the controller's clocks).
-  "native-ufs-root=1",
-  "native-ufs-diagnostics=2",
+  "native-emmc-root=1",
+  "native-emmc-diagnostics=2",
   # The Data seed is larger than 2 GiB, so changed pages go through the store window after the root image.
   "sheng-data-persist=2",
   # Continuous on-screen bring-up page, tagged so a photograph says which image it is.
   "boot-progress=2",
-  "sheng-build-tag=tb128fu-095",
+  "sheng-build-tag=xun-001",
   # Adreno 610 bring-up (package/GpuProbe.cpp): snapshot, power at 320 MHz, read-only view of the GPU's SMMU (all passed in
   # tb128fu-020), the TrustZone queries (tb128fu-021: SCM calls answer; IS_CALL_AVAIL(init_image) 1, PAS_IS_SUPPORTED(13) 0;
   # XNU manages 0x8487c000-0x18487c000, so gpu_region@55615000 is outside it). Stages 5 and 6 (a hand-built SMMU bank, the first

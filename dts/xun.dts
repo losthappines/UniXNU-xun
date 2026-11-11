@@ -1,0 +1,160 @@
+/dts-v1/;
+
+/ {
+    model = "Xiaomi Redmi Pad SE (xun)";
+    compatible = "xiaomi,xun", "qcom,khaje", "qcom,sm6225";
+    #address-cells = <2>;
+    #size-cells = <2>;
+
+    memory@40000000 {
+        device_type = "memory";
+        reg = <0x0 0x40000000 0x1 0x80000000>;
+    };
+
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+
+        smem_region@46000000 {
+            reg = <0x0 0x46000000 0x0 0x00200000>;
+            no-map;
+        };
+
+        gpu_region@55B15000 {
+            reg = <0x0 0x55B15000 0x0 0x00002000>;
+            no-map;
+        };
+
+        splash_region@5c000000 {
+            reg = <0x0 0x5c000000 0x0 0x00f00000>;
+            label = "cont_splash_region";
+            no-map;
+        };
+
+        ramoops@5d000000 {
+            compatible = "ramoops";
+            reg = <0x0 0x5d000000 0x0 0x00200000>;
+            record-size = <0x00040000>;
+            console-size = <0x00080000>;
+            pmsg-size = <0x00100000>;
+        };
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        cpu@0 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a53";
+            reg = <0x0>;
+            enable-method = "psci";
+        };
+
+        cpu@1 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a53";
+            reg = <0x1>;
+            enable-method = "psci";
+        };
+
+        cpu@2 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a53";
+            reg = <0x2>;
+            enable-method = "psci";
+        };
+
+        cpu@3 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a53";
+            reg = <0x3>;
+            enable-method = "psci";
+        };
+
+        cpu@100 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a73";
+            reg = <0x100>;
+            enable-method = "psci";
+        };
+
+        cpu@101 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a73";
+            reg = <0x101>;
+            enable-method = "psci";
+        };
+
+        cpu@102 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a73";
+            reg = <0x102>;
+            enable-method = "psci";
+        };
+
+        cpu@103 {
+            device_type = "cpu";
+            compatible = "arm,cortex-a73";
+            reg = <0x103>;
+            enable-method = "psci";
+        };
+    };
+
+    psci {
+        compatible = "arm,psci-1.0";
+        method = "smc";
+    };
+
+    timer {
+        compatible = "arm,armv8-timer";
+        clock-frequency = <19200000>;
+        interrupt-parent = <&intc>;
+        interrupts = <1 19 0xf08>; /* INTID 19 EL1 virtual timer */
+    };
+
+    soc {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+        compatible = "simple-bus";
+
+        intc: interrupt-controller@f200000 {
+            compatible = "arm,gic-v3";
+            #interrupt-cells = <3>;
+            interrupt-controller;
+            reg = <0x0 0x0f200000 0x0 0x00010000>,   /* Distributor */
+                  <0x0 0x0f300000 0x0 0x00100000>;   /* Redistributors */
+            redistributor-stride = <0x0 0x00020000>;
+        };
+
+        sdhci@4744000 {
+            compatible = "qcom,sdhci-msm-v5", "qcom,sdhci-msm";
+            reg = <0x0 0x04744000 0x0 0x00001000>;
+            interrupt-parent = <&intc>;
+            bus-width = <8>;
+            non-removable;
+            status = "okay";
+        };
+
+        framebuffer@5c000000 {
+            compatible = "simple-framebuffer";
+            reg = <0x0 0x5c000000 0x0 0x00f00000>;
+            width = <1200>;
+            height = <1920>;
+            stride = <4800>; /* 1200 * 4 */
+            format = "a8r8g8b8";
+            status = "okay";
+        };
+
+        touch@62 {
+            compatible = "novatek,NVT-ts", "focaltech,fts";
+            reg = <0x0 0x62 0x0 0x1>;
+            interrupt-parent = <&intc>;
+            novatek,irq-gpio = <80>;
+            novatek,reset-gpio = <86>;
+            status = "okay";
+        };
+    };
+};
