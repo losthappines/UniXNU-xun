@@ -40,6 +40,12 @@ windows = [
   { name = "SystemOS", component = "Cryptex1,SystemOS" },
 ]
 
+[root]
+os_volume_uuid = "04769D26-2CA0-4825-B443-E2E5F88300F2"
+systemos_volume_uuid = "8846FE78-2910-4297-AF97-D59BB6F8FC16"
+os_image_sha256 = "3f99b859c9728379110b66657c7b15285bcb1925ad8b5726542e2cdcf8b1028d"
+systemos_image_sha256 = "b4908cde41d23e6bc05e6af51a2c9eeb00cf0f863a6a18b1600c96a3fd70414f"
+
 [kernel]
 defconfig = "xun_defconfig"
 # Archive builders of the kernel step, in order; the ones xun_defconfig links. build-arm-driver.py is UniXNU's generic

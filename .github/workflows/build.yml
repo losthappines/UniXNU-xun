@@ -53,13 +53,19 @@ jobs:
           if [ -d "UniXNU-xun/uefi/Resources" ]; then
             cp -r UniXNU-xun/uefi/Resources/* Mu-Silicium/Resources/
           fi
+          if [ -d "UniXNU/package/UniXNUPkg" ]; then
+            cp -r UniXNU/package/UniXNUPkg Mu-Silicium/
+          fi
+          if [ -d "UniXNU/drivers/DarwinBoot" ]; then
+            cp -r UniXNU/drivers/DarwinBoot Mu-Silicium/DarwinBootPkg
+          fi
           export UNIXNU_UEFI="$GITHUB_WORKSPACE/Mu-Silicium"
           python3 UniXNU-xun/scripts/check-xun.py
 
       - name: Build UEFI Firmware Volume (SILICIUM_UEFI.fd)
         working-directory: UniXNU
         run: |
-          python3 unixnu build firmware --uefi ../Mu-Silicium -D ../UniXNU-xun || true
+          python3 unixnu build firmware --uefi ../Mu-Silicium -D ../UniXNU-xun
 
       - name: Upload UEFI Artifacts
         uses: actions/upload-artifact@v4
