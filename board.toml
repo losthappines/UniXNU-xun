@@ -130,7 +130,7 @@ fd = "Build/xunPkg/{target}_CLANGPDB/FV/SILICIUM_UEFI.fd"
 preflight = ["scripts/check-xun.py"]   # reads the checkout from UNIXNU_UEFI
 submodules = ["Binaries", "Common/Mu", "Common/Mu_OEM_Sample", "Silicium-ACPI", "Silicon/Silicium/OpensslPkg/Library/OpensslLib/openssl"]
 # Masks a GIC interrupt that has no handler instead of taking it forever (found on sheng with a leftover IPCC interrupt).
-patches = ["Resources/MuPatches/Gic-Spurious.patch"]
+patches = []
 packages = [
   "{uefi}",
   "{uefi}/Platforms/Lenovo",
