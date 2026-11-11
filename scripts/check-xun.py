@@ -15,14 +15,15 @@ import struct
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
 PLATFORM = Path('Platforms/Xiaomi/xunPkg')
 REQUIRED = {
     PLATFORM / 'xun.dsc': ['UniXNUPkg/Application/UniXNU/UniXNU.inf', 'UniXNUPkg/Driver/UniXNUDxe/UniXNUDxe.inf',
-                           'shengPkg/Drivers/ShengBootMemoryDxe/ShengBootMemoryDxe.inf',
+                           'UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf',
                            'DarwinBootPkg/Driver/DarwinBoot.inf',
                            'UniXNULib|UniXNUPkg/Library/UniXNULib/UniXNULib.inf'],
     PLATFORM / 'xun.fdf': ['INF UniXNUPkg/Application/UniXNU/UniXNU.inf', 'INF UniXNUPkg/Driver/UniXNUDxe/UniXNUDxe.inf'],
-    PLATFORM / 'Include/DXE.inc': ['INF shengPkg/Drivers/ShengBootMemoryDxe/ShengBootMemoryDxe.inf',
+    PLATFORM / 'Include/DXE.inc': ['INF UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf',
                                    'INF DarwinBootPkg/Driver/DarwinBoot.inf'],
 }
 
@@ -75,8 +76,9 @@ def main():
         for wanted in lines:
             if wanted not in live:
                 errors.append(f'{path} does not list {wanted}')
-    if not (uefi / 'Platforms/Xiaomi/shengPkg/Drivers/ShengBootMemoryDxe/ShengBootMemoryDxe.c').is_file():
-        errors.append('the ramdisk block device driver (shengPkg/Drivers/ShengBootMemoryDxe) is missing')
+    if not ((ROOT.parents[0] / 'UniXNU/package/UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c').is_file() or
+            (uefi / 'UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.c').is_file()):
+        errors.append('the ramdisk block device driver (UniXNURamDiskDxe) is missing')
 
     source = (uefi / PLATFORM / 'Library/MemoryMapLib/MemoryMapLib.c').read_text()
     rows = [(m[1], int(m[2], 16), int(m[3], 16), m[4]) for m in re.finditer(

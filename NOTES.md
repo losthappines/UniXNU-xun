@@ -8,9 +8,11 @@
 - **Baseline Framework:** UniXNU Format-2 Device Repository (`schema_version = 2`), seeded from `xVanTuring/UniXNU-tb128fu`
 
 ## Current Milestone
-- **Milestone:** Stage 1 — Workspace Initialization & Hardware Extraction Complete
-- **Last Confirmed Stage:** Stage 1 (DTB extraction & verification)
-- **Active Blocker:** None (Stage 1 complete, moving to Stage 2 UEFI bring-up)
+- **Milestone:** Stage 2 — Mu-Silicium UEFI Bring-Up (`xunPkg`) & Green-Screen Diagnostic Complete
+- **Last Confirmed Stage:** Stage 2 (UEFI xunPkg scaffolded, check-xun passed 52 descriptors, boot-green.img built)
+- **Commit SHA:** `6827685` (Stage 1), Stage 2 updates staged
+- **Porting Record Status:** 13/13 structured areas checked and validated
+- **Active Blocker:** Awaiting hardware flashing of `boot-green.img` or advance to Stage 3 Apple Device Tree / XNU kernel build
 
 ## Verified Hardware Parameters (Extracted from Official HyperOS ROM Live DTBs)
 
