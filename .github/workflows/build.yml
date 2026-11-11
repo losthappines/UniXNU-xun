@@ -78,8 +78,13 @@ jobs:
 
   build-xnu:
     name: Build 4K XNU Kernel & Device Tree (iPadOS 17.7.11)
-    runs-on: macos-15
+    # macos-26 carries Xcode 26 / Clang 20+ required for -Wno-unnecessary-virtual-specifier
+    runs-on: macos-26
     timeout-minutes: 180
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+      HOMEBREW_NO_ENV_HINTS: 1
     steps:
       - name: Check out UniXNU-xun
         uses: actions/checkout@v4
@@ -94,11 +99,19 @@ jobs:
 
       - name: Install Toolchain Tools
         run: |
-          brew install dtc lzfse llvm || true
+          brew install llvm lld mtools dtc lzfse
+          if ! command -v unifdef >/dev/null; then
+            brew install unifdef
+            echo "$(brew --prefix unifdef)/bin" >> "$GITHUB_PATH"
+          fi
 
-      - name: Select Xcode iphoneos SDK
+      - name: Select Xcode 26 & iphoneos SDK
         run: |
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          XCODE_APP=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1 || echo /Applications/Xcode.app)
+          echo "Using Xcode: $XCODE_APP"
+          echo "DEVELOPER_DIR=$XCODE_APP/Contents/Developer" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
+          xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
 
       - name: Generate Apple Device Trees (.adt)
@@ -111,6 +124,8 @@ jobs:
 
       - name: Configure & Build XNU Kernel (MACHINE_CONFIGS=BCM2837)
         working-directory: UniXNU
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 unixnu defconfig xun_defconfig -D ../UniXNU-xun
           python3 unixnu build kernel -D ../UniXNU-xun
@@ -122,5 +137,6 @@ jobs:
           path: |
             UniXNU/out/**/kernel.macho
             UniXNU/out/**/kernel.macho.adt
+            UniXNU/out/**/kernel/kernel.*
             UniXNU-xun/out/xun/*.adt
           if-no-files-found: warn

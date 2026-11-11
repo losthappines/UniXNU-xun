@@ -83,6 +83,7 @@
   UniXNULib|UniXNUPkg/Library/UniXNULib/UniXNULib.inf
 
 [Components]
+  spes/AcpiTables.inf
   UniXNUPkg/Application/UniXNU/UniXNU.inf
   UniXNUPkg/Driver/UniXNUDxe/UniXNUDxe.inf
   UniXNUPkg/Driver/UniXNURamDiskDxe/UniXNURamDiskDxe.inf
