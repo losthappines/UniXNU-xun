@@ -49,8 +49,11 @@
 #define TB_GPIO_STRIDE 0x1000
 #define TB_GPIO_SPI_FIRST 0                   // DTS qupv3_se0_spi_active: gpio0/1/2 data and clock, qupv3_se0_spi_cs_active: gpio3
 #define TB_GPIO_SPI_CS 3
-#define TB_GPIO_IRQ 80                        // himax,irq-gpio = <&tlmm 80 0x2008>, active low
-#define TB_GPIO_RESET 86                      // himax,rst-gpio = <&tlmm 86 0>
+#define TB_GPIO_IRQ 80                        // xun / tb128fu: irq-gpio = <&tlmm 80 0x2008>, active low
+#define TB_GPIO_RESET 86                      // xun / tb128fu: rst-gpio = <&tlmm 86 0>
+#define XUN_TOUCH_I2C_ADDR 0x62               // xun: FocalTech / Novatek NVT-ts on QUP SE
+#define XUN_PANEL_WIDTH 1200                  // xun portrait panel width
+#define XUN_PANEL_HEIGHT 1920                 // xun portrait panel height
 #define TB_FUNC_QUP0 1                        // pinctrl-khaje.c PINGROUP(0..3, qup0, ...): function slot 1
 #define TB_FUNC_GPIO 0
 #define TB_DRIVE_6MA 2                        // DTS drive-strength = <6>
