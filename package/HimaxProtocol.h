@@ -14,8 +14,8 @@
 #define HX_XFER_MAX (HX_CHUNK + 8)    // F2 00 a0..a3 + chunk, F3 cmd 00 + read
 #define HX_EVENT_LEN 68               // HX_MAX_PT 10: 10 x (X, Y) + 10 widths + 2 + point count + 3 + 12 stylus (touch_info_size)
 #define HX_MAX_PT 10
-#define HX_X_MAX 1199                 // panel-coords = <0 1199 0 1999> (DTS), firmware X/Y resolution 1200 x 2000
-#define HX_Y_MAX 1999
+#define HX_X_MAX 1199                 // panel-coords = <0 1199 0 1919> (DTS), firmware X/Y resolution 1200 x 1920
+#define HX_Y_MAX 1919
 #define HX_PARTS_MAX 16
 #define HX_CFG_MAX 0x8000             // DSRAM_SIZE: the merged config image must fit
 

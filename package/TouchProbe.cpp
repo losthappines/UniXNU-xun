@@ -368,7 +368,7 @@ void trackStrokes(unsigned count, const hx_point *p) {
     }
 }
 
-// The finger set in the digitizer's units (x 0..30480 across the panel's 1200 pixels, y 0..20320 across its 2000), under the
+// The finger set in the digitizer's units (x 0..30480 across the panel's 1200 pixels, y 0..20320 across its 1920), under the
 // sequence lock TouchState.cpp describes, then the HID input's notification.
 void publish(unsigned count, const hx_point *p) {
     trackStrokes(count, p);

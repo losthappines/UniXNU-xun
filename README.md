@@ -22,7 +22,7 @@ into it.
 | Interrupts and timer | GICv3; the EL1 virtual timer is INTID 19 here; SGIs do not arrive, so the IPIs are software-pended SPIs 504..511 |
 | CPU frequency | Both clusters at their top level (1.9 / 2.4 GHz) |
 | DDR | 2096 MHz, the top of the DT's table (the boot loader leaves 1555): every RPM clock voted to its top, then the RPM's clock scaling switched on |
-| Display | The home screen appears 70–95 s after boot; QuartzCore draws on the CPU into the firmware frame buffer (1200×2000) |
+| Display | The home screen appears 70–95 s after boot; QuartzCore draws on the CPU into the firmware frame buffer (1200×1920) |
 | Touch | Himax HX83102E on QUP SE0 SPI; the kernel downloads the zero-flash firmware and publishes events through NativeHidInput |
 | GPU | Adreno 610 powered at 320 MHz, its SMMU context, zap shader, CP, interrupt and NativeAdreno published; the user-client path passes its self test. The Metal user space (Turnip, metal2vulkan, plugin) is not built for it yet |
 | Diagnostics | The boot log goes to the end of userdata and is read over USB by a small Linux reader image; the kernel returns the tablet to fastboot after a set time |
@@ -182,7 +182,7 @@ tree is the source of the memory and SoC values; `boot_a` is the stock Lenovo im
 | Storage | Samsung UFS 2.2 KM2L9001CM-B518, ufshc 0x04804000, 6 LUNs, GCC UFS 0x45000, apps SMMU 0x0c600000, stream 0x60 | `drivers/Tb128fuUfs` (`--sm6225`), `GccUfs.h` |
 | Boot image of the stock `boot` | header v2, page 4096, base 0, kernel 0x8000, ramdisk 0x1000000, tags 0x100, no dtb fields; no `vendor_boot`; slot `_a` | this repository uses header v1, base 0x80000000, kernel 0x80008000, ramdisk 0x81000000, tags 0x80000100, page 4096 |
 | DTB | 18 DTBs appended to the stock boot image; `dtb_idx=8` is the Khaje SoC base and `dtbo_idx=12` is the Lenovo overlay; the merged live tree is "KHAJE IDP nopmi", board-id 0x10022 | `Resources/DTBs/tb128fu.dtb` is the merged live tree, sanitized |
-| Panel | `mdss_dsi_hx83102p_boe_2k_video`, 1200×2000, 60 Hz, video mode; `cont_splash_region` 0x5c000000+0xf00000 | SimpleFbDxe 1200×2000×32; "Display Reserved" descriptor |
+| Panel | `qcom,mdss_dsi_panel_*`, 1200×1920, 90 Hz, video mode; `cont_splash_region` 0x5c000000+0xf00000 | SimpleFbDxe 1200×1920×32; "Display Reserved" descriptor |
 | Touch | Himax `himax,hxcommon`, SPI 0x04a80000, 10 MHz, IRQ GPIO 80, reset GPIO 86 | for a later touch driver |
 | GPU | Adreno 610 v2 (chip ID 0x6010001), no GMU | |
 | SPMI keys | PMIC arbiter `qcom,spmi@1c40000`, PM6125 | not wired: `ShengKeyInputDxe` reads sheng's 0x0c400000 arbiter and is not included |

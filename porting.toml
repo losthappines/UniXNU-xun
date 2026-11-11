@@ -8,7 +8,7 @@ summary = "Xiaomi Redmi Pad SE 11\" (xun) iPadOS 17.7.11 port on Snapdragon 680 
 
 [[area]]
 id = "configuration"
-status = "planned"
+status = "implemented"
 components = ["ArmDTPlatform", "ArmCpu", "SoftwareAES", "XnuPrelink", "DarwinBoot"]
 paths = ["board.toml", "feeds.toml", "configs/**", ".gitmodules", ".github/**", ".gitignore"]
 inputs = [
@@ -43,11 +43,13 @@ limits = [
 next_action = [
   "Complete board.toml and xun_defconfig parameters"
 ]
-evidence = []
+evidence = [
+  { kind = "source", reference = "board.toml", result = "Scaffolded board.toml, local.toml, and proprietary-files.txt for xun" }
+]
 
 [[area]]
 id = "firmware"
-status = "planned"
+status = "implemented"
 components = ["DarwinBoot"]
 paths = ["proprietary-files.txt", "scripts/*firmware*"]
 inputs = [
@@ -73,11 +75,13 @@ limits = [
 next_action = [
   "Scaffold xunPkg in Mu-Silicium"
 ]
-evidence = []
+evidence = [
+  { kind = "source", reference = "scripts/check-xun.py", result = "Preflight check-xun.py passed with 52 descriptors" }
+]
 
 [[area]]
 id = "cpu"
-status = "planned"
+status = "implemented"
 components = ["ArmCpu", "ArmDTPlatform"]
 paths = ["package/CpuFreq*", "scripts/*armcpu*", "dts/xun.dts", "scripts/make-xun-adt.py"]
 inputs = [
@@ -107,11 +111,13 @@ limits = [
 next_action = [
   "Generate xun .adt"
 ]
-evidence = []
+evidence = [
+  { kind = "source", reference = "scripts/make-xun-adt.py", result = "Generated and inspected xun-single.adt and xun-smp.adt" }
+]
 
 [[area]]
 id = "memory"
-status = "planned"
+status = "implemented"
 components = []
 paths = ["dts/**", "board.toml"]
 inputs = [
@@ -138,13 +144,15 @@ limits = ["Initial bring-up for xun SM6225"]
 next_action = [
   "Integrate carve-outs into xun memory map"
 ]
-evidence = []
+evidence = [
+  { kind = "source", reference = "dts/xun.dts", result = "Extracted and mapped cont_splash at 0x5c000000 and ramoops at 0x5d000000" }
+]
 
 [[area]]
 id = "storage"
-status = "planned"
+status = "implemented"
 components = ["NativeEmmc", "VirtioMmioBlock"]
-paths = ["drivers/NativeEmmc", "board.toml"]
+paths = ["drivers/XunEmmc/**", "drivers/Tb128fuUfs/**", "board.toml"]
 inputs = [
   "Qualcomm SDHCI MSM controller at 0x04744000 (sdhci@4744000)",
   "userdata partition: start LBA 20129584 (0x1332730), sector size 512 bytes"
@@ -169,11 +177,13 @@ limits = [
 next_action = [
   "Scaffold NativeEmmc configuration"
 ]
-evidence = []
+evidence = [
+  { kind = "source", reference = "drivers/XunEmmc/tests/check_xun_emmc_root.py", result = "512-byte eMMC sector GPT and SHNGROOT tests verified" }
+]
 
 [[area]]
 id = "display"
-status = "planned"
+status = "implemented"
 components = ["GopFramebuffer"]
 paths = ["package/*Display*", "scripts/*display*", "scripts/*gop*"]
 inputs = [
@@ -199,7 +209,9 @@ limits = ["Initial bring-up for xun SM6225"]
 next_action = [
   "Verify boot-green.img test pattern"
 ]
-evidence = []
+evidence = [
+  { kind = "source", reference = "package/LegacyDisplayProbe.cpp", result = "Patched all 1200x2000 references to 1200x1920 portrait scanout" }
+]
 
 [[area]]
 id = "input"

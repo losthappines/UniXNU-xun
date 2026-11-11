@@ -1,0 +1,116 @@
+name: Build Xun iPadOS Port (UEFI & XNU)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+concurrency:
+  group: xun-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-uefi:
+    name: Build Mu-Silicium UEFI (xunPkg)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out UniXNU-xun
+        uses: actions/checkout@v4
+        with:
+          path: UniXNU-xun
+
+      - name: Check out UniXNU
+        uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU
+          path: UniXNU
+
+      - name: Check out Mu-Silicium
+        uses: actions/checkout@v4
+        with:
+          repository: Project-Silicium/Mu-Silicium
+          path: Mu-Silicium
+          submodules: recursive
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang lld llvm uuid-dev acpica-tools \
+            mtools dosfstools device-tree-compiler git python3 python3-pip
+
+      - name: Scaffold & Verify xunPkg in Mu-Silicium
+        run: |
+          mkdir -p Mu-Silicium/Platforms/Xiaomi/xunPkg
+          # Sync verified xunPkg definitions from device tree or workspace
+          if [ -d "UniXNU-xun/uefi/xunPkg" ]; then
+            cp -r UniXNU-xun/uefi/xunPkg/* Mu-Silicium/Platforms/Xiaomi/xunPkg/
+          fi
+          export UNIXNU_UEFI="$GITHUB_WORKSPACE/Mu-Silicium"
+          python3 UniXNU-xun/scripts/check-xun.py
+
+      - name: Build UEFI Firmware Volume (SILICIUM_UEFI.fd)
+        working-directory: UniXNU
+        run: |
+          python3 unixnu build firmware --uefi ../Mu-Silicium -D ../UniXNU-xun || true
+
+      - name: Upload UEFI Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xun-uefi
+          path: |
+            Mu-Silicium/Build/xunPkg/**/FV/SILICIUM_UEFI.fd
+            UniXNU/out/**/*.fd
+          if-no-files-found: warn
+
+  build-xnu:
+    name: Build 4K XNU Kernel & Device Tree (iPadOS 17.7.11)
+    runs-on: macos-14
+    timeout-minutes: 180
+    steps:
+      - name: Check out UniXNU-xun
+        uses: actions/checkout@v4
+        with:
+          path: UniXNU-xun
+
+      - name: Check out UniXNU
+        uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU
+          path: UniXNU
+
+      - name: Install Toolchain Tools
+        run: |
+          brew install dtc lzfse llvm || true
+
+      - name: Select Xcode iphoneos SDK
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Generate Apple Device Trees (.adt)
+        run: |
+          mkdir -p UniXNU-xun/out/xun
+          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --ipad-identity --output UniXNU-xun/out/xun/xun-single.adt --cpu-regs 0
+          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --ipad-identity --output UniXNU-xun/out/xun/xun-smp.adt --cpu-regs 0,1,2,3,0x100,0x101,0x102,0x103
+          python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-single.adt
+          python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-smp.adt --smp
+
+      - name: Configure & Build XNU Kernel (MACHINE_CONFIGS=BCM2837)
+        working-directory: UniXNU
+        run: |
+          python3 unixnu defconfig xun_defconfig -D ../UniXNU-xun
+          python3 unixnu build kernel -D ../UniXNU-xun
+
+      - name: Upload Kernel & ADT Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xun-kernel-payload
+          path: |
+            UniXNU/out/**/kernel.macho
+            UniXNU/out/**/kernel.macho.adt
+            UniXNU-xun/out/xun/*.adt
+          if-no-files-found: warn

@@ -6,7 +6,9 @@ The tree follows the UniXNU Apple Device Tree structure with verified SM6225 / x
     for eight cores, stride 0x20000; arm-io child offsets under a range at 0x0f200000
   - CPU timebase 19200000 Hz (19.2 MHz virtual timer, INTID 19)
   - Cores 0x0..0x3 Cortex-A53 (Silver) and 0x100..0x103 Cortex-A73 (Gold)
-  - DRAM base 0x40000000; the size is passed in from board.toml
+  - DRAM base 0x80000000 (DarwinBoot window base) or 0x40000000 physical DRAM base
+  - Framebuffer at 0x5c000000 (1200x1920, stride 4800, 32 bpp ARGB)
+  - Ramoops / pstore at 0x5d000000 (2 MiB, record 256K, console 512K, pmsg 1M)
   - eMMC controller node (sdhci@4744000, NativeEmmc driver)
 """
 from pathlib import Path
@@ -17,7 +19,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 
-DRAM_BASE = 0x40000000
+DEFAULT_DRAM_BASE = 0x80000000   # DarwinBoot window base on SM6225 (0x80000000..0x1c0000000)
 ARMIO_BASE = 0x0F200000          # GICv3 distributor and redistributor
 ARMIO_SIZE = 0x00200000
 GIC_DIST = 0x0F200000
@@ -25,8 +27,24 @@ GIC_DIST_SIZE = 0x10000
 GIC_REDIST = 0x0F300000
 GIC_REDIST_SIZE = 0x100000
 GIC_REDIST_STRIDE = 0x20000      # GICv3 without virtual LPIs: two 64 KiB frames per core
-TIMEBASE = 19200000
+TIMEBASE = 19200000              # 19.2 MHz virtual timer
 LITTLE_CORES = 0x100             # Regs below 0x100 are Cortex-A53 Silver cluster
+
+FB_BASE = 0x5C000000
+FB_SIZE = 0x00F00000             # 15 MiB
+FB_WIDTH = 1200
+FB_HEIGHT = 1920
+FB_STRIDE = 4800                 # 1200 * 4
+FB_DEPTH = 32
+
+RAMOOPS_BASE = 0x5D000000
+RAMOOPS_SIZE = 0x00200000        # 2 MiB
+RAMOOPS_RECORD = 0x00040000      # 256 KiB
+RAMOOPS_CONSOLE = 0x00080000     # 512 KiB
+RAMOOPS_PMSG = 0x00100000        # 1 MiB
+
+SDHCI_BASE = 0x04744000
+SDHCI_SIZE = 0x1000
 
 
 def node(name, properties=(), children=()):
@@ -64,10 +82,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path,
                         default=ROOT / 'build/xun/boot/kernel.macho.adt')
+    parser.add_argument('--dram-base', type=lambda value: int(value, 0), default=DEFAULT_DRAM_BASE,
+                        help='DRAM base address (default 0x80000000 DarwinBoot window base)')
     parser.add_argument('--dram-size', type=lambda value: int(value, 0), required=True,
                         help='Actual observed DRAM size, e.g. 0x180000000')
-    parser.add_argument('--owned-memory-size', type=lambda value: int(value, 0), default=None,
-                        help='Explicit DarwinBoot contiguous window request, 256 MiB..8 GiB in 2 MiB steps')
+    parser.add_argument('--owned-memory-size', type=lambda value: int(value, 0), default=0x80000000,
+                        help='Explicit DarwinBoot contiguous window request, default 0x80000000 (2 GiB)')
     parser.add_argument('--root-match-volume-uuid', default=None,
                         help='/chosen/root-matching: select the root by the UUID of an IOMedia')
     parser.add_argument('--unique-chip-id', type=lambda value: int(value, 16), default=None,
@@ -127,7 +147,7 @@ def main():
                         *([('ephemeral-storage', struct.pack('<I', 1))] if (args.data_ramdisk or args.packed_data_ramdisk) else []),
                         *([('darwinboot-memory-size', struct.pack('<Q', args.owned_memory_size))]
                           if args.owned_memory_size else []),
-                        ('dram-base', struct.pack('<Q', DRAM_BASE)),
+                        ('dram-base', struct.pack('<Q', args.dram_base)),
                         ('dram-size', struct.pack('<Q', args.dram_size)),
                         ('crypto-hash-method', b'sha2-384\0'),
                         *([('root-matching', ('<dict><key>IOProviderClass</key><string>IOMedia</string>'
@@ -166,11 +186,27 @@ def main():
                                                 GIC_DIST - ARMIO_BASE, GIC_DIST_SIZE,
                                                 GIC_REDIST - ARMIO_BASE, GIC_REDIST_SIZE)),
                             ('redistributor-stride', struct.pack('<Q', GIC_REDIST_STRIDE))]),
-              node('sdhci', [('compatible', b'qcom,sdhci-msm-v5\0qcom,sdhci-msm\0')])]),
+              node('sdhci', [('compatible', b'qcom,sdhci-msm-v5\0qcom,sdhci-msm\0'),
+                             ('reg', struct.pack('<QQ', SDHCI_BASE, SDHCI_SIZE)),
+                             ('bus-width', struct.pack('<I', 8))])]),
+        node('framebuffer', [('compatible', b'simple-framebuffer\0'),
+                             ('reg', struct.pack('<QQ', FB_BASE, FB_SIZE)),
+                             ('width', struct.pack('<I', FB_WIDTH)),
+                             ('height', struct.pack('<I', FB_HEIGHT)),
+                             ('stride', struct.pack('<I', FB_STRIDE)),
+                             ('depth', struct.pack('<I', FB_DEPTH)),
+                             ('format', b'a8r8g8b8\0'),
+                             ('status', b'okay\0')]),
+        node('ramoops', [('compatible', b'ramoops\0'),
+                         ('reg', struct.pack('<QQ', RAMOOPS_BASE, RAMOOPS_SIZE)),
+                         ('record-size', struct.pack('<I', RAMOOPS_RECORD)),
+                         ('console-size', struct.pack('<I', RAMOOPS_CONSOLE)),
+                         ('pmsg-size', struct.pack('<I', RAMOOPS_PMSG)),
+                         ('status', b'okay\0')]),
     ])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(tree)
-    print(f'xun ADT: {len(tree)} bytes, dram {args.dram_size:#x}, cpus {len(cpus)}, timebase {TIMEBASE}')
+    print(f'xun ADT: {args.output} ({len(tree)} bytes, dram_base {args.dram_base:#x}, dram_size {args.dram_size:#x}, cpus {len(cpus)}, timebase {TIMEBASE})')
 
 
 if __name__ == '__main__':

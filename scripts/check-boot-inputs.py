@@ -20,7 +20,7 @@ OS_UUID = '04769D26-2CA0-4825-B443-E2E5F88300F2'
 SYSTEMOS_UUID = '8846FE78-2910-4297-AF97-D59BB6F8FC16'
 DATA_UUID = '73F1FA24-4189-446D-96D4-FB6324EBE955'
 TRUST_PIN = '7416ca4f8377146626bb284e2133c76bee6cb4e3ee0af5d648b186235a7323a7'
-BOOT_LIMIT = 96 * 1024 * 1024
+BOOT_LIMIT = 57 * 1024 * 1024
 DIGEST_INFO = bytes.fromhex('3031300d060960864801650304020105000420')
 
 
@@ -136,7 +136,7 @@ def check_payload(path):
     except (OSError, subprocess.CalledProcessError):
         print('payload: mtype unavailable or image unreadable, args not checked')
         return
-    for needle in ('native-ufs-root=1', 'sheng-data-persist=2', 'boot-progress=2', 'Payloads/scratch-data.img'):
+    for needle in (('native-emmc-root=1' if 'native-emmc-root=1' in text else 'native-ufs-root=1'), 'sheng-data-persist=2', 'boot-progress=2', 'Payloads/scratch-data.img'):
         if needle not in text:
             fail(f'payload lacks {needle}')
     print('payload: root, persistence and boot-progress arguments plus the Data initrd are present')
@@ -144,7 +144,7 @@ def check_payload(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--out', type=Path, default=Path('../UniXNU/out/tb128fu'), help='build output directory')
+    parser.add_argument('--out', type=Path, default=Path('../UniXNU/out/xun'), help='build output directory')
     parser.add_argument('--userdata', type=Path)
     parser.add_argument('--kernel', type=Path)
     parser.add_argument('--boot', type=Path)

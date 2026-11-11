@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 // Bounded offline original lifecycle instrument; no desktop claim.
-// LegacyDisplayProbe.cpp of UniXNU-sheng; on the TB128FU the late probe starts only the key store and HID probes (as
-// UniXNU-qemu's), and the display is the firmware frame buffer (SimpleFbDxe's GOP, 1200x2000) with QuartzCore's CPU renderer.
+// LegacyDisplayProbe.cpp of UniXNU-sheng; on xun the late probe starts only the key store and HID probes (as
+// UniXNU-qemu's), and the display is the firmware frame buffer (SimpleFbDxe's GOP, 1200x1920) with QuartzCore's CPU renderer.
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/IODeviceMemory.h>
 #include <IOKit/IODeviceTreeSupport.h>

@@ -290,7 +290,7 @@ kernel_args = [
 ]
 
 [payload.adt]
-tool = "scripts/make-tb128fu-adt.py"
+tool = "scripts/make-xun-adt.py"
 chip_id = "207"
 # 4 GiB, the iPad7,1's memory size (sheng, the board that runs iPadOS, owns 0x130000000). The firmware maps the free 0x80000000..0x1c0000000 run as one region. The first
 # boots used 2 GiB: iPadOS reached SpringBoard with 97 processes, but free memory fell to about 5 MiB.

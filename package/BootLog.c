@@ -614,7 +614,7 @@ static size_t compose(char *out, size_t cap, uint32_t slot, unsigned now) {
   if (&native_touch_stroke_count && &native_touch_strokes && &native_touch_extent && native_touch_stroke_count) {
     char row[160];
     const uint32_t n = native_touch_stroke_count;
-    snprintf(row, sizeof row, "[touch] strokes=%u extent x %d..%d y %d..%d (panel px of 1200x2000)", n, native_touch_extent[0] / 10,
+    snprintf(row, sizeof row, "[touch] strokes=%u extent x %d..%d y %d..%d (panel px of 1200x1920)", n, native_touch_extent[0] / 10,
              native_touch_extent[1] / 10, native_touch_extent[2] / 10, native_touch_extent[3] / 10);
     at = put(out, at, cap, row, sizeof row);
     for (uint32_t k = n > 16 ? n - 16 : 0; k < n; ++k) {
