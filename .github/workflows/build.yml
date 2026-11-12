@@ -124,8 +124,8 @@ jobs:
       - name: Generate Apple Device Trees (.adt)
         run: |
           mkdir -p UniXNU-xun/out/xun
-          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --ipad-identity --output UniXNU-xun/out/xun/xun-single.adt --cpu-regs 0
-          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --ipad-identity --output UniXNU-xun/out/xun/xun-smp.adt --cpu-regs 0,1,2,3,0x100,0x101,0x102,0x103
+          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-single.adt --cpu-regs 0
+          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-smp.adt --cpu-regs 0,1,2,3,0x100,0x101,0x102,0x103
           python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-single.adt
           python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-smp.adt --smp
 
