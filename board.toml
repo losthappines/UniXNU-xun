@@ -142,6 +142,8 @@ BUILDID_STRING = "xun-research"
 
 # Image parameters come from Resources/Configs/xun.toml of the checkout. Resources/DTBs/xun.dtb carries
 # /reserved-memory/cont_splash_region@5c000000, so no [[bootimg.dtb_node]] is added.
+[bootimg.image]
+kernel_compression = "none"
 
 # The ramdisk of the boot image: a FAT volume with the UniXNU config, the kernel, its device tree and the optional
 # trust cache and Data seed. DarwinBoot is part of the firmware volume.

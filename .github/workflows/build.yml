@@ -60,6 +60,7 @@ jobs:
             cp -r UniXNU/drivers/DarwinBoot Mu-Silicium/DarwinBootPkg
           fi
           export UNIXNU_UEFI="$GITHUB_WORKSPACE/Mu-Silicium"
+          python3 UniXNU-xun/scripts/patch-mu-sec-entryarg.py "$UNIXNU_UEFI"
           python3 UniXNU-xun/scripts/check-xun.py
 
       - name: Build UEFI Firmware Volume (SILICIUM_UEFI.fd)
@@ -211,15 +212,6 @@ jobs:
         working-directory: UniXNU
         run: |
           cp -r ../UniXNU-xun/uefi/Resources/* ../Mu-Silicium/Resources/
-          python3 - <<'PY'
-          from pathlib import Path
-          shim = Path('../Mu-Silicium/BootShim/BootShim.S')
-          text = shim.read_text()
-          old = '.quad FD_SIZE'
-          new = '.quad FD_SIZE + (_Payload - _Head)'
-          assert old in text, 'Unexpected BootShim.S layout'
-          shim.write_text(text.replace(old, new, 1))
-          PY
           FD_PATH=$(find ../ci-artifacts/xun-uefi -name 'SILICIUM_UEFI.fd' | head -n 1)
           RAMDISK_PATH=$(find ../ci-artifacts/xun-kernel-payload -name 'payload.img' | head -n 1)
           echo "Using FD: $FD_PATH"
@@ -227,15 +219,14 @@ jobs:
           test -f "$FD_PATH"
           test -f "$RAMDISK_PATH"
           mkdir -p ../out/xun
-          python3 unixnu bootimg -D ../UniXNU-xun \
-            --uefi ../Mu-Silicium \
+          python3 ../UniXNU-xun/scripts/make-xun-bootimg.py \
             --fd "$FD_PATH" \
             --dtb ../Mu-Silicium/Resources/DTBs/xun.dtb \
             --ramdisk "$RAMDISK_PATH" \
             -o ../out/xun/boot.img
           SIZE=$(wc -c < ../out/xun/boot.img)
           echo "boot.img size: $SIZE bytes"
-          python3 -c "import sys; s=$SIZE; limit=57*1024*1024; print(f'Size check: {s} / {limit} ({s/1048576:.2f} MiB)'); sys.exit(0 if s <= limit else 1)"
+          python3 -c "import sys; s=$SIZE; limit=64*1024*1024; print(f'Size check: {s} / {limit} ({s/1048576:.2f} MiB)'); sys.exit(0 if s <= limit else 1)"
 
       - name: Upload Boot Image Artifact
         uses: actions/upload-artifact@v4

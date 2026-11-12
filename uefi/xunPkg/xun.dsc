@@ -83,6 +83,10 @@
   UniXNULib|UniXNUPkg/Library/UniXNULib/UniXNULib.inf
 
 [Components]
+  MdeModulePkg/Universal/PCD/Dxe/Pcd.inf {
+    <LibraryClasses>
+      PcdLib|MdePkg/Library/BasePcdLibNull/BasePcdLibNull.inf
+  }
   spes/AcpiTables.inf
   UniXNUPkg/Application/UniXNU/UniXNU.inf
   UniXNUPkg/Driver/UniXNUDxe/UniXNUDxe.inf
