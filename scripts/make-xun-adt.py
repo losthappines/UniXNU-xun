@@ -20,8 +20,8 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_DRAM_BASE = 0x80000000   # DarwinBoot window base on SM6225 (0x80000000..0x1c0000000)
-ARMIO_BASE = 0x0F200000          # GICv3 distributor and redistributor
-ARMIO_SIZE = 0x00200000
+ARMIO_BASE = 0x04000000          # 16 MiB-aligned SoC window covering SDHCI (0x04744000) & GICv3 (0x0f200000..0x0f400000)
+ARMIO_SIZE = 0x10000000          # 0x04000000..0x14000000
 GIC_DIST = 0x0F200000
 GIC_DIST_SIZE = 0x10000
 GIC_REDIST = 0x0F300000
@@ -180,14 +180,14 @@ def main():
         node('arm-io', [('device_type', b'arm-io\0'),
                         ('#address-cells', struct.pack('<I', 2)),
                         ('#size-cells', struct.pack('<I', 2)),
-                        ('ranges', struct.pack('<QQQ', 0, 0, 0x20000000))],
+                        ('ranges', struct.pack('<QQQ', 0, ARMIO_BASE, ARMIO_SIZE))],
              [node('intc', [('compatible', b'arm,gic-v3\0'),
                             ('reg', struct.pack('<4Q',
-                                                GIC_DIST, GIC_DIST_SIZE,
-                                                GIC_REDIST, GIC_REDIST_SIZE)),
+                                                GIC_DIST - ARMIO_BASE, GIC_DIST_SIZE,
+                                                GIC_REDIST - ARMIO_BASE, GIC_REDIST_SIZE)),
                             ('redistributor-stride', struct.pack('<Q', GIC_REDIST_STRIDE))]),
               node('sdhci', [('compatible', b'qcom,sdhci-msm-v5\0qcom,sdhci-msm\0'),
-                             ('reg', struct.pack('<QQ', SDHCI_BASE, SDHCI_SIZE)),
+                             ('reg', struct.pack('<QQ', SDHCI_BASE - ARMIO_BASE, SDHCI_SIZE)),
                              ('bus-width', struct.pack('<I', 8))])]),
         node('framebuffer', [('compatible', b'simple-framebuffer\0'),
                              ('reg', struct.pack('<QQ', FB_BASE, FB_SIZE)),

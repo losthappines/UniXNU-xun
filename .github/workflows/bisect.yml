@@ -24,6 +24,12 @@ on:
       reset_before:
         description: "true = reset at call site before the call"
         default: "false"
+      no_probe:
+        description: "true = skip patch-xnu-entry-probe.py (boot kernel unmodified)"
+        default: "false"
+      fix_armio:
+        description: "true = patch payload ADT /arm-io to non-zero 0x04000000 base and relative child offsets"
+        default: "false"
 
 jobs:
   bisect:
@@ -65,15 +71,46 @@ jobs:
           $LLVM_NM -n patched.macho > symbols.txt || true
           $LLVM_OBJDUMP -d --disassemble-symbols=_arm_init patched.macho | grep -E '\sbl\s' > arm_init_calls.txt || true
           wc -l arm_init_calls.txt
-          ARGS="--reset-delay ${{ inputs.delay }}"
-          if [ -n "${{ inputs.reset_after }}" ]; then
-            ARGS="$ARGS --reset-after ${{ inputs.reset_after }} --in ${{ inputs.reset_in }} --occurrence ${{ inputs.occurrence }}"
-            if [ "${{ inputs.reset_before }}" = "true" ]; then ARGS="$ARGS --reset-before"; fi
+          if [ "${{ inputs.no_probe }}" != "true" ]; then
+            ARGS="--reset-delay ${{ inputs.delay }}"
+            if [ -n "${{ inputs.reset_after }}" ]; then
+              ARGS="$ARGS --reset-after ${{ inputs.reset_after }} --in ${{ inputs.reset_in }} --occurrence ${{ inputs.occurrence }}"
+              if [ "${{ inputs.reset_before }}" = "true" ]; then ARGS="$ARGS --reset-before"; fi
+            fi
+            python3 UniXNU-xun/scripts/patch-xnu-entry-probe.py patched.macho $ARGS
           fi
-          python3 UniXNU-xun/scripts/patch-xnu-entry-probe.py patched.macho $ARGS
           cp "$PAYLOAD" payload.img
-          mdel -i payload.img ::EFI/UniXNU/Payloads/kernel.macho
-          mcopy -i payload.img patched.macho ::EFI/UniXNU/Payloads/kernel.macho
+          if [ "${{ inputs.no_probe }}" != "true" ]; then
+            mdel -i payload.img ::EFI/UniXNU/Payloads/kernel.macho
+            mcopy -i payload.img patched.macho ::EFI/UniXNU/Payloads/kernel.macho
+          fi
+          if [ "${{ inputs.fix_armio }}" = "true" ]; then
+            mcopy -i payload.img ::EFI/UniXNU/Payloads/kernel.macho.adt adt.bin
+            python3 - <<'PY'
+import struct
+from pathlib import Path
+p = Path('adt.bin')
+b = p.read_bytes()
+ARMIO_BASE = 0x04000000
+ARMIO_SIZE = 0x10000000
+repls = [
+    (struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, 0, 0x20000000),
+     struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, ARMIO_BASE, ARMIO_SIZE), 'arm-io ranges'),
+    (struct.pack('<4Q', 0x0F200000, 0x10000, 0x0F300000, 0x100000),
+     struct.pack('<4Q', 0x0F200000 - ARMIO_BASE, 0x10000, 0x0F300000 - ARMIO_BASE, 0x100000), 'intc reg'),
+    (struct.pack('<QQ', 0x04744000, 0x1000), struct.pack('<QQ', 0x04744000 - ARMIO_BASE, 0x1000), 'sdhci reg'),
+]
+for old, new, label in repls:
+    cnt = b.count(old)
+    assert cnt == 1, f'{label}: expected 1 match, got {cnt}'
+    b = b.replace(old, new, 1)
+p.write_bytes(b)
+print('Patched adt.bin successfully')
+PY
+            python3 UniXNU-xun/scripts/inspect-adt.py adt.bin --smp
+            mdel -i payload.img ::EFI/UniXNU/Payloads/kernel.macho.adt
+            mcopy -i payload.img adt.bin ::EFI/UniXNU/Payloads/kernel.macho.adt
+          fi
           mdir -i payload.img ::EFI/UniXNU/Payloads
           mkdir -p out
           python3 UniXNU-xun/scripts/make-xun-bootimg.py --fd "$FD" --dtb UniXNU-xun/uefi/Resources/DTBs/xun.dtb --ramdisk payload.img -o out/boot.img
