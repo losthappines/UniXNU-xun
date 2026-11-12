@@ -103,7 +103,7 @@ static bool findEmmcRootLayout (RootLayout *layout, ReadFn hostReadSectors, cons
     return false;
   }
 
-  uint64_t backup = le64 (gScratch + 32), first = le64 (gScratch + 40), last = le64 (gScratch + 48);
+ uint64_t first = le64 (gScratch + 40), last = le64 (gScratch + 48);
   uint32_t entriesCrc = le32 (gScratch + 88);
   uint64_t entriesLba = le64 (gScratch + 72);
   uint32_t count = le32 (gScratch + 80);
