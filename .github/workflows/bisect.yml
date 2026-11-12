@@ -86,27 +86,26 @@ jobs:
           fi
           if [ "${{ inputs.fix_armio }}" = "true" ]; then
             mcopy -i payload.img ::EFI/UniXNU/Payloads/kernel.macho.adt adt.bin
-            python3 - <<'PY'
-import struct
-from pathlib import Path
-p = Path('adt.bin')
-b = p.read_bytes()
-ARMIO_BASE = 0x04000000
-ARMIO_SIZE = 0x10000000
-repls = [
-    (struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, 0, 0x20000000),
-     struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, ARMIO_BASE, ARMIO_SIZE), 'arm-io ranges'),
-    (struct.pack('<4Q', 0x0F200000, 0x10000, 0x0F300000, 0x100000),
-     struct.pack('<4Q', 0x0F200000 - ARMIO_BASE, 0x10000, 0x0F300000 - ARMIO_BASE, 0x100000), 'intc reg'),
-    (struct.pack('<QQ', 0x04744000, 0x1000), struct.pack('<QQ', 0x04744000 - ARMIO_BASE, 0x1000), 'sdhci reg'),
-]
-for old, new, label in repls:
-    cnt = b.count(old)
-    assert cnt == 1, f'{label}: expected 1 match, got {cnt}'
-    b = b.replace(old, new, 1)
-p.write_bytes(b)
-print('Patched adt.bin successfully')
-PY
+            python3 -c "
+            import struct
+            from pathlib import Path
+            p = Path('adt.bin')
+            b = p.read_bytes()
+            ARMIO_BASE, ARMIO_SIZE = 0x04000000, 0x10000000
+            repls = [
+                (struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, 0, 0x20000000),
+                 struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, ARMIO_BASE, ARMIO_SIZE), 'arm-io ranges'),
+                (struct.pack('<4Q', 0x0F200000, 0x10000, 0x0F300000, 0x100000),
+                 struct.pack('<4Q', 0x0F200000 - ARMIO_BASE, 0x10000, 0x0F300000 - ARMIO_BASE, 0x100000), 'intc reg'),
+                (struct.pack('<QQ', 0x04744000, 0x1000), struct.pack('<QQ', 0x04744000 - ARMIO_BASE, 0x1000), 'sdhci reg'),
+            ]
+            for old, new, label in repls:
+                cnt = b.count(old)
+                assert cnt == 1, f'{label}: expected 1 match, got {cnt}'
+                b = b.replace(old, new, 1)
+            p.write_bytes(b)
+            print('Patched adt.bin successfully')
+            "
             python3 UniXNU-xun/scripts/inspect-adt.py adt.bin --smp
             mdel -i payload.img ::EFI/UniXNU/Payloads/kernel.macho.adt
             mcopy -i payload.img adt.bin ::EFI/UniXNU/Payloads/kernel.macho.adt
