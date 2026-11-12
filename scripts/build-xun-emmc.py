@@ -29,7 +29,8 @@ while i < len(cxx_recipe['arguments']):
     i += 1
 
 command += [
-    '-I', str(ROOT / '.cache/xnu-work/osfmks'),
+    '-I', str(ROOT / '.cache/xnu-work/osfmk'),
+    '-I', str(ROOT / 'build/storage-abi/include'),
     '-I', str(driver),
     '-Wall', '-Wextra', '-Werror',
     '-Wno-unused-parameter', '-Wno-incompatible-sysroot', '-Wno-c99-designator',
