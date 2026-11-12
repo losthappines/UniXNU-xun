@@ -27,6 +27,7 @@ jobs:
         with:
           repository: UniXNU/UniXNU
           path: UniXNU
+          submodules: recursive
 
       - name: Check out Mu-Silicium
         uses: actions/checkout@v4
@@ -98,6 +99,7 @@ jobs:
         with:
           repository: UniXNU/UniXNU
           path: UniXNU
+          submodules: recursive
 
       - name: Check out Mu-Silicium (Font.h for panic screen)
         uses: actions/checkout@v4
@@ -191,6 +193,7 @@ jobs:
         with:
           repository: UniXNU/UniXNU
           path: UniXNU
+          submodules: recursive
 
       - name: Check out Mu-Silicium
         uses: actions/checkout@v4

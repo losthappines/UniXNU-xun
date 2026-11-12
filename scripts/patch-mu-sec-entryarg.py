@@ -83,14 +83,20 @@ def apply_patches(uefi: Path, dry_run: bool = False) -> None:
             replace_once(path, old, new, marker)
 
     # Force DarwinBoot Video[1] (v_display) to 0 so XNU activates kPETextMode framebuffer console
+    bv_found = 0
     for root_dir in [uefi, uefi.parent]:
         if root_dir.exists():
             for bv in root_dir.rglob("BootVideo.h"):
+                bv_found += 1
                 bv_text = bv.read_text()
                 if "Video[1] = 1;" in bv_text:
                     if not dry_run:
                         bv.write_text(bv_text.replace("Video[1] = 1;", "Video[1] = 0;"))
                     print(f"{'Verified' if dry_run else 'Patched'} DarwinBoot BootVideo.h at {bv} (v_display = 0 for text console)")
+                elif "Video[1] = 0;" in bv_text:
+                    print(f"Already patched DarwinBoot BootVideo.h at {bv} (v_display = 0)")
+    if bv_found == 0:
+        raise SystemExit("patch-mu-sec-entryarg: no BootVideo.h found! Ensure UniXNU submodules are checked out.")
 
     print(f"{'Verified' if dry_run else 'Patched'} Mu-Silicium SEC entry-arg HOB in {uefi}")
 
