@@ -87,11 +87,11 @@ OSDefineMetaClassAndStructors (NativeEmmc, IOBlockStorageDevice)
 
 IOService *NativeEmmc::probe (IOService *provider, SInt32 *score)
 {
-    native_emmc_probe_calls++;
+    native_emmc_probe_calls = native_emmc_probe_calls + 1;
     if (!IOBlockStorageDevice::probe (provider, score)) {
         return nullptr;
     }
-    native_emmc_matched++;
+    native_emmc_matched = native_emmc_matched + 1;
     *score = 2500;
     return this;
 }
@@ -214,7 +214,7 @@ IOReturn NativeEmmc::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
     for (UInt64 i = 0; i < count; i++) {
         uint64_t lba = XUN_USERDATA_FIRST_LBA + block + i;
         if (!readSectorPIO(lba, scratch)) {
-            native_emmc_read_errors++;
+            native_emmc_read_errors = native_emmc_read_errors + 1;
             result = kIOReturnIOError;
             break;
         }
@@ -223,7 +223,7 @@ IOReturn NativeEmmc::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block,
             break;
         }
         actual += 512;
-        native_emmc_blocks_read++;
+        native_emmc_blocks_read = native_emmc_blocks_read + 1;
     }
 
     completion->action(completion->target, completion->parameter, result, actual);

@@ -152,14 +152,13 @@ volume = "XUNESP"
 size_mib = 55
 timeout = 2
 loader = "firmware"
-title = "xun first boot: source 4K XNU to the panic screen"
+title = "iPadOS 17.7.11 (xun)"
 # DRAM base is 0x40000000. XNU spans from 0x40000000 across contiguous free DRAM.
 dram_size = "0x180000000"
 skip_setup_tool = "scripts/seed-data-skip-setup.py"
 skip_setup_args = ["--no-auto-dim", "--plain-framebuffer"]
 panic_screen = true
 entry_probe_reset_delay = 0
-entry_probe_reset_after = "_arm_vm_init"
 entry_probe_reset_before = false
 # The original static/System trust caches of the same IPSW, as accepted by UniXNU-sheng.
 trust_cache_sha256 = [
@@ -186,6 +185,8 @@ kernel_args = [
   "native-emmc-root=1",
   "native-emmc-diagnostics=2",
   "sheng-data-persist=2",
+  "cs_enforcement_disable=1",
+  "amfi_get_out_of_my_way=1",
 ]
 
 [payload.adt]

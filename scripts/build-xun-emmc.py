@@ -47,7 +47,7 @@ command += [
     '-Wall', '-Wextra', '-Werror',
     '-Wno-unused-parameter', '-Wno-incompatible-sysroot', '-Wno-c99-designator',
     '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion',
-    '-Wno-unnecessary-virtual-specifier',
+    '-Wno-unnecessary-virtual-specifier', '-Wno-deprecated-volatile',
 ]
 
 result = subprocess.run(command, cwd=cxx_recipe['directory'], capture_output=True, text=True)
