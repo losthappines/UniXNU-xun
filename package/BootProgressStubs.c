@@ -7,6 +7,7 @@
  * LegacyDisplayProbe, NativeHidInput and TouchState define many of these) takes precedence.
  */
 #include <stdint.h>
+#include <stddef.h>
 #pragma clang attribute push (__attribute__((weak)), apply_to = any(function, variable))
 void boot_ui_trace_snapshot(unsigned a) { (void)a; }
 char boot_ui_trace_rows[14][120];
@@ -141,4 +142,31 @@ volatile uint32_t native_touch_edge_stats[4];
 volatile int32_t native_touch_extent[4];
 volatile uint32_t native_touch_stroke_count;
 volatile int32_t native_touch_strokes[16][7];
+volatile uint32_t native_touch_loop_step;
+volatile int native_touch_ids[12];
+volatile uint32_t native_legacy_rej_options[3];
+volatile uint32_t native_legacy_rej_rects[2][4];
+volatile uint32_t native_virtio_ready, native_virtio_read_requests, native_virtio_read_failures;
+volatile uint64_t native_virtio_verified_blocks;
+volatile int native_owner_root_accepted;
+volatile uint32_t native_ram_block_sparse;
+volatile uint64_t native_ram_block_bytes, native_ram_block_resident_bytes;
+volatile uint32_t native_data_persist_state, native_data_persist_header, native_data_persist_gpt, native_data_persist_gpt_after;
+volatile uint64_t native_data_persist_pages, native_data_persist_loaded, native_data_persist_writes, native_data_persist_syncs, native_data_persist_errors, native_data_persist_first_lba, native_data_persist_present;
+volatile uint64_t native_ufs_verify_ticks, native_ufs_read_ticks;
+volatile uint32_t native_ufs_probe_calls, native_ufs_matched, native_ufs_root_step;
+const char *volatile native_ufs_root_failure;
+char native_ufs_link_rows[3][120];
+volatile uint64_t native_ufs_slot_stats[8];
+int native_ufs_log_open(uint64_t *a, uint64_t *b, const char **c) { (void)a;(void)b;(void)c;return 0; }
+int native_ufs_log_write(uint64_t a, uint32_t b, const void *c) { (void)a;(void)b;(void)c;return 0; }
+uint64_t native_ufs_export_blocks(void) { return 0; }
+int native_ufs_export_write(uint64_t a, uint32_t b, const void *c) { (void)a;(void)b;(void)c;return 0; }
+int native_ufs_log_sync(void) { return 0; }
+unsigned native_ufs_store_gpt_check(void) { return 0xff; }
+char tb128fu_rpm_rows[3][120];
+char tb128fu_usb_rows[5][120];
+void tb128fu_usb_log_put(const void *d, size_t l) { (void)d;(void)l; }
+char tb128fu_gpu_dvfs[2][120];
+char tb128fu_ddr_rows[3][120];
 #pragma clang attribute pop

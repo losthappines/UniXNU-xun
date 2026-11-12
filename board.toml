@@ -58,26 +58,10 @@ archives = [
   "build-arm-driver.py SoftwareAES",
   # NativeEmmc: Qualcomm SDHCI MSM (sdhci@4744000) for eMMC 5.1
   "build-xun-emmc.py",
-  "audit-storage-interface.py",
-  "build-arm-driver.py VirtioMmioBlock --verified-root",
-  "build-virtio-mmio-bindings.py --component VirtioMmioBlock --directory build/virtio-mmio-block-verified",
-  "build-arm-driver.py RamBlock",
-  "build-virtio-mmio-bindings.py --component RamBlock --directory build/ram-block",
   "build-software-aes-bindings.py",
   "build-libpthread-kernel.py",
   "build-link-stubs.py",
-    "build-arm-driver.py NativeLegacyDisplay",
-  "build-arm-driver.py NativeGOPPresenter",
-  # The 395-byte owner root anchor and the XNU crypto adapter; the signed envelopes are in userdata,
-  # built with `unixnu build userdata --root-policy OS=... --root-policy SystemOS=...`.
-  "build-verified-root-key.py --pin 70a5ea346d2d779a7ef43eb4ed8b17f54488e160d8c2a6d6420969664e3ae798",
-  # Adreno610, the Adreno 610 half of NativeAdreno (no GMU), with the SMMU and PM4 kits (CONFIG_XNU_NATIVE_ADRENO), then the
-  # staged accelerator class added to the same archive.
-  "build-adreno610.py",
-  "build-adreno740-accelerator.py --component Adreno610",
-  # The display, key store stand-in and HID input (CONFIG_XNU_NATIVE_LEGACY_DISPLAY); it reads the previous kernel step's
-  # kernel.macho and UniXNU-qemu's display reference (see its header).
-  "build-gop-legacy-display.py",
+  "build-platform-power.py",
 ]
 
 # The same original kernelcache and prelink selection as UniXNU-sheng: the target image is the same.

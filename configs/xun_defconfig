@@ -8,27 +8,21 @@ CONFIG_XNU_ARM_DT_PLATFORM=y
 CONFIG_XNU_ARMCPU=y
 CONFIG_XNU_NATIVE_AES=y
 
-# NativeEmmc: Qualcomm SDHCI MSM (sdhci@4744000) eMMC 5.1 block class with VerifiedRoot owner policy
+# NativeEmmc: Qualcomm SDHCI MSM (sdhci@4744000) eMMC 5.1
 CONFIG_XNU_NATIVE_EMMC=y
 CONFIG_XNU_NATIVE_EMMC_ARCHIVE="{tree}/build/xun-emmc/libXunEmmc.a"
 
-# Verified variant: its root authorization query is what the owner chain below calls.
-CONFIG_XNU_NATIVE_VIRTIO_BLOCK=y
-CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE="{tree}/build/virtio-mmio-block-verified/libVirtioMmioBlock.a"
-
-# The Data seed: a packed APFS scratch volume published as a RAM block device.
-CONFIG_XNU_NATIVE_RAM_BLOCK=y
-
-# Owner root chain: audit/trust the verified root, mount SystemOS cryptex as cache carrier,
-# publish boot manifest, mount scratch Data volume.
-CONFIG_XNU_VERIFIED_ROOT_PROBE=y
-CONFIG_XNU_OWNER_ROOT_AUDIT=y
-CONFIG_XNU_OWNER_ROOT_TRUST=y
-CONFIG_XNU_OWNER_CACHE_MOUNT=y
-CONFIG_XNU_OWNER_CACHE_STARTUP=y
-CONFIG_XNU_OWNER_BOOT_MANIFEST=y
-CONFIG_XNU_OWNER_DATA_MOUNT=y
-CONFIG_XNU_OWNER_UNION_SYSTEMOS=y
+# Deferred until QEMU/KDK storage-abi audit & owner-root policy blobs are generated:
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK=n
+CONFIG_XNU_NATIVE_RAM_BLOCK=n
+CONFIG_XNU_VERIFIED_ROOT_PROBE=n
+CONFIG_XNU_OWNER_ROOT_AUDIT=n
+CONFIG_XNU_OWNER_ROOT_TRUST=n
+CONFIG_XNU_OWNER_CACHE_MOUNT=n
+CONFIG_XNU_OWNER_CACHE_STARTUP=n
+CONFIG_XNU_OWNER_BOOT_MANIFEST=n
+CONFIG_XNU_OWNER_DATA_MOUNT=n
+CONFIG_XNU_OWNER_UNION_SYSTEMOS=n
 
 # The SystemOS volume of the signed policy and the Data seed volume of the payload.
 CONFIG_XNU_OWNER_ROOT_VOLUME_UUID="04769D26-2CA0-4825-B443-E2E5F88300F2"
@@ -43,20 +37,14 @@ CONFIG_XNU_NATIVE_ARCH_TIMER=y
 CONFIG_XNU_NATIVE_PAN=n
 CONFIG_XNU_SHENG_PMGR=y
 
-# On-screen bring-up progress bars (arm_vm_init, bsd_init, root authentication, mount stages)
-CONFIG_XNU_BOOT_PROGRESS=y
+# On-screen bring-up progress bars (requires UEFI Font.h + UFS/owner-root interlock in upstream baseline script; deferred for first CI build)
+CONFIG_XNU_BOOT_PROGRESS=n
 
 CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
 CONFIG_XNU_BUILD_ARCHIVES=y
 
-CONFIG_XNU_EXTRA_LD_ARCHIVES="{tree}/build/link-stubs/libLinkStubs.a"
-CONFIG_XNU_VERIFIED_ROOT_ARCHIVE="{tree}/build/verified-root-key/libVerifiedRootKey.a"
+CONFIG_XNU_EXTRA_LD_ARCHIVES="-Wl,-force_load,{tree}/build/link-stubs/libLinkStubs.a -Wl,-force_load,{tree}/build/xun-emmc/libXunEmmc.a"
 CONFIG_XNU_NATIVE_MOBILE_DISPLAY=n
 CONFIG_XNU_ARMVIRT_PLATFORM=n
-
-# GOP Framebuffer / NativeLegacyDisplay on continuous splash buffer at 0x5c000000
-CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y
-
-# Adreno 610 GPU kernel driver
-CONFIG_XNU_NATIVE_ADRENO=y
-CONFIG_XNU_NATIVE_ADRENO_ARCHIVE="{tree}/build/adreno610/libAdreno610.a"
+CONFIG_XNU_NATIVE_LEGACY_DISPLAY=n
+CONFIG_XNU_NATIVE_ADRENO=n
