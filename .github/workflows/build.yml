@@ -97,6 +97,12 @@ jobs:
           repository: UniXNU/UniXNU
           path: UniXNU
 
+      - name: Check out Mu-Silicium (Font.h for panic screen)
+        uses: actions/checkout@v4
+        with:
+          repository: Project-Silicium/Mu-Silicium
+          path: Mu-Silicium
+
       - name: Install Toolchain Tools
         run: |
           brew install llvm lld mtools dtc lzfse
@@ -130,13 +136,104 @@ jobs:
           python3 unixnu defconfig xun_defconfig -D ../UniXNU-xun
           python3 unixnu build kernel -D ../UniXNU-xun
 
-      - name: Upload Kernel & ADT Artifacts
+      - name: Fetch Trust Caches & Build Payload Volume (payload.img)
+        working-directory: UniXNU
+        env:
+          UNIXNU_UEFI: ${{ github.workspace }}/Mu-Silicium
+          UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+        run: |
+          export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
+          python3 unixnu ipsw fetch StaticTrustCache Cryptex1,SystemTrustCache -D ../UniXNU-xun
+          python3 - <<'PY'
+          import hashlib, struct, sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from unixnu.ipsw import im4p_payload
+          ipsw_dir = Path('out/ipsw/21H461')
+          static_tc = im4p_payload((ipsw_dir / '044-76040-038.dmg.trustcache').read_bytes())
+          system_tc = im4p_payload((ipsw_dir / '044-76034-038.dmg.trustcache').read_bytes())
+          bundle = struct.pack('<3I', 2, 12, 12 + len(static_tc)) + static_tc + system_tc
+          sha = hashlib.sha256(bundle).hexdigest()
+          expected = '7416ca4f8377146626bb284e2133c76bee6cb4e3ee0af5d648b186235a7323a7'
+          assert sha == expected, f'Trust cache bundle hash mismatch: {sha} != {expected}'
+          Path('out/original-static-system.bundle').write_bytes(bundle)
+          print(f'Staged trust cache bundle ({len(bundle)} bytes, sha256 {sha})')
+          PY
+          python3 unixnu build payload -D ../UniXNU-xun --trust-cache out/original-static-system.bundle
+
+      - name: Upload Kernel, Payload & ADT Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: xun-kernel-payload
           path: |
             UniXNU/out/**/kernel.macho
-            UniXNU/out/**/kernel.macho.adt
             UniXNU/out/**/kernel/kernel.*
+            UniXNU/out/**/payload/payload.img
+            UniXNU/out/**/payload/payload.json
             UniXNU-xun/out/xun/*.adt
           if-no-files-found: warn
+
+  package-bootimg:
+    name: Package Android Boot Image (boot.img)
+    needs: [build-uefi, build-xnu]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out UniXNU-xun
+        uses: actions/checkout@v4
+        with:
+          path: UniXNU-xun
+
+      - name: Check out UniXNU
+        uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU
+          path: UniXNU
+
+      - name: Check out Mu-Silicium
+        uses: actions/checkout@v4
+        with:
+          repository: Project-Silicium/Mu-Silicium
+          path: Mu-Silicium
+
+      - name: Install Packaging Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm device-tree-compiler python3
+
+      - name: Download UEFI & Payload Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ci-artifacts
+
+      - name: Stage Mu-Silicium Resources & Assemble boot.img
+        working-directory: UniXNU
+        run: |
+          cp -r ../UniXNU-xun/uefi/Resources/* ../Mu-Silicium/Resources/
+          FD_PATH=$(find ../ci-artifacts/xun-uefi -name 'SILICIUM_UEFI.fd' | head -n 1)
+          RAMDISK_PATH=$(find ../ci-artifacts/xun-kernel-payload -name 'payload.img' | head -n 1)
+          echo "Using FD: $FD_PATH"
+          echo "Using Ramdisk: $RAMDISK_PATH"
+          test -f "$FD_PATH"
+          test -f "$RAMDISK_PATH"
+          mkdir -p ../out/xun
+          python3 unixnu bootimg -D ../UniXNU-xun \
+            --uefi ../Mu-Silicium \
+            --fd "$FD_PATH" \
+            --dtb ../Mu-Silicium/Resources/DTBs/xun.dtb \
+            --ramdisk "$RAMDISK_PATH" \
+            -o ../out/xun/boot.img
+          SIZE=$(wc -c < ../out/xun/boot.img)
+          echo "boot.img size: $SIZE bytes"
+          python3 -c "import sys; s=$SIZE; limit=57*1024*1024; print(f'Size check: {s} / {limit} ({s/1048576:.2f} MiB)'); sys.exit(0 if s <= limit else 1)"
+
+      - name: Upload Boot Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xun-bootimg
+          path: |
+            out/xun/boot.img
+            out/xun/boot.json
+            ci-artifacts/xun-kernel-payload/**/payload.json
+          if-no-files-found: error

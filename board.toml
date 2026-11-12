@@ -147,7 +147,7 @@ BUILDID_STRING = "xun-research"
 # trust cache and Data seed. DarwinBoot is part of the firmware volume.
 [payload]
 volume = "XUNESP"
-size_mib = 72
+size_mib = 55
 timeout = 2
 loader = "firmware"
 title = "xun first boot: source 4K XNU to the panic screen"
