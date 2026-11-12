@@ -57,7 +57,7 @@ archives = [
   "build-arm-driver.py ArmCpu",
   "build-arm-driver.py SoftwareAES",
   # NativeEmmc: Qualcomm SDHCI MSM (sdhci@4744000) for eMMC 5.1
-  "build-arm-driver.py NativeEmmc --sm6225",
+  "build-xun-emmc.py",
   "build-arm-driver.py VirtioMmioBlock --verified-root",
   "build-virtio-mmio-bindings.py --component VirtioMmioBlock --directory build/virtio-mmio-block-verified",
   "build-arm-driver.py RamBlock",
