@@ -30,6 +30,9 @@ on:
       fix_armio:
         description: "true = patch payload ADT /arm-io to non-zero 0x04000000 base and relative child offsets"
         default: "false"
+      fix_cluster:
+        description: "true = mask cluster-type properties in payload ADT (MAX_CPU_CLUSTERS=1)"
+        default: "false"
 
 jobs:
   bisect:
@@ -84,25 +87,32 @@ jobs:
             mdel -i payload.img ::EFI/UniXNU/Payloads/kernel.macho
             mcopy -i payload.img patched.macho ::EFI/UniXNU/Payloads/kernel.macho
           fi
-          if [ "${{ inputs.fix_armio }}" = "true" ]; then
+          if [ "${{ inputs.fix_armio }}" = "true" ] || [ "${{ inputs.fix_cluster }}" = "true" ]; then
             mcopy -i payload.img ::EFI/UniXNU/Payloads/kernel.macho.adt adt.bin
             python3 -c "
             import struct
             from pathlib import Path
             p = Path('adt.bin')
             b = p.read_bytes()
-            ARMIO_BASE, ARMIO_SIZE = 0x04000000, 0x10000000
-            repls = [
-                (struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, 0, 0x20000000),
-                 struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, ARMIO_BASE, ARMIO_SIZE), 'arm-io ranges'),
-                (struct.pack('<4Q', 0x0F200000, 0x10000, 0x0F300000, 0x100000),
-                 struct.pack('<4Q', 0x0F200000 - ARMIO_BASE, 0x10000, 0x0F300000 - ARMIO_BASE, 0x100000), 'intc reg'),
-                (struct.pack('<QQ', 0x04744000, 0x1000), struct.pack('<QQ', 0x04744000 - ARMIO_BASE, 0x1000), 'sdhci reg'),
-            ]
-            for old, new, label in repls:
-                cnt = b.count(old)
-                assert cnt == 1, f'{label}: expected 1 match, got {cnt}'
-                b = b.replace(old, new, 1)
+            if '${{ inputs.fix_armio }}' == 'true':
+                ARMIO_BASE, ARMIO_SIZE = 0x04000000, 0x10000000
+                repls = [
+                    (struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, 0, 0x20000000),
+                     struct.pack('<32sI', b'ranges', 24) + struct.pack('<QQQ', 0, ARMIO_BASE, ARMIO_SIZE), 'arm-io ranges'),
+                    (struct.pack('<4Q', 0x0F200000, 0x10000, 0x0F300000, 0x100000),
+                     struct.pack('<4Q', 0x0F200000 - ARMIO_BASE, 0x10000, 0x0F300000 - ARMIO_BASE, 0x100000), 'intc reg'),
+                    (struct.pack('<QQ', 0x04744000, 0x1000), struct.pack('<QQ', 0x04744000 - ARMIO_BASE, 0x1000), 'sdhci reg'),
+                ]
+                for old, new, label in repls:
+                    cnt = b.count(old)
+                    assert cnt == 1, f'{label}: expected 1 match, got {cnt}'
+                    b = b.replace(old, new, 1)
+            if '${{ inputs.fix_cluster }}' == 'true':
+                old_ct = struct.pack('<32s', b'cluster-type')
+                new_ct = struct.pack('<32s', b'x-cluster-ty')
+                cnt = b.count(old_ct)
+                assert cnt == 8, f'cluster-type: expected 8 matches, got {cnt}'
+                b = b.replace(old_ct, new_ct)
             p.write_bytes(b)
             print('Patched adt.bin successfully')
             "
