@@ -65,7 +65,7 @@ jobs:
           $LLVM_NM -n patched.macho > symbols.txt || true
           $LLVM_OBJDUMP -d --disassemble-symbols=_arm_init patched.macho | grep -E '\sbl\s' > arm_init_calls.txt || true
           wc -l arm_init_calls.txt
-          ARGS="--panic-screen --reset-delay ${{ inputs.delay }}"
+          ARGS="--reset-delay ${{ inputs.delay }}"
           if [ -n "${{ inputs.reset_after }}" ]; then
             ARGS="$ARGS --reset-after ${{ inputs.reset_after }} --in ${{ inputs.reset_in }} --occurrence ${{ inputs.occurrence }}"
             if [ "${{ inputs.reset_before }}" = "true" ]; then ARGS="$ARGS --reset-before"; fi
