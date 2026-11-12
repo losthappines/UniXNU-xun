@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 #include <IOKit/IOLib.h>
 #include <IOKit/IOService.h>
-#include <IOKit/IOMemoryMap.h>
+#include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/IODeviceMemory.h>
 
 #define SDHCI_BASE 0x04744000ULL
