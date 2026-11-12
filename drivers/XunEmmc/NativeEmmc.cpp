@@ -8,7 +8,6 @@
 #include <IOKit/IOPlatformExpert.h>
 #include <IOKit/storage/IOBlockStorageDevice.h>
 #include <IOKit/IOMemoryDescriptor.h>
-#include <IOKit/IOMemoryMap.h>
 #include <IOKit/IOLib.h>
 #include <pexpert/pexpert.h>
 #include "RootLayout.h"
