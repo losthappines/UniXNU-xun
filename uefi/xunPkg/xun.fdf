@@ -87,8 +87,8 @@ READ_LOCK_STATUS   = TRUE
   INF UniXNUPkg/Application/UniXNU/UniXNU.inf
   INF UniXNUPkg/Driver/UniXNUDxe/UniXNUDxe.inf
 
-  # RAM Manager
-  INF SiliciumPkg/Drivers/RamManagerDxe/RamManagerDxe.inf
+  # RAM Manager (omitted: all xun DRAM is statically mapped in MemoryMapLib; no vendor RamPartitionProtocol)
+  #INF SiliciumPkg/Drivers/RamManagerDxe/RamManagerDxe.inf
 
   # SmBios
   INF MdeModulePkg/Universal/SmbiosDxe/SmbiosDxe.inf
