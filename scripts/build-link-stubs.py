@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-source = ROOT / 'kits/tb128fu/LinkStubs.c'
+source = ROOT / 'kits/xun/LinkStubs.c' if (ROOT / 'kits/xun/LinkStubs.c').exists() else ROOT / 'package/LinkStubs.c'
 out = ROOT / 'build/link-stubs'
 out.mkdir(parents=True, exist_ok=True)
 obj, archive = out / 'LinkStubs.o', out / 'libLinkStubs.a'
