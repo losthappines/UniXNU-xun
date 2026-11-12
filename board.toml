@@ -171,7 +171,7 @@ trust_cache_sha256 = [
 # through the userdata store window (a seed above 2 GiB has no volatile backing).
 kernel_args = [
   "-v",
-  "serial=3",
+  "serial=0",
   "debug=0x14e",
   "kt_fixed_zones=120",
   "armcpu-diagnostics=1",
