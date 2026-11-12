@@ -13,7 +13,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'build/boot-progress'
 OUT.mkdir(parents=True, exist_ok=True)
-sources = ROOT / 'kits/tb128fu'
+sources = ROOT / 'kits/xun' if (ROOT / 'kits/xun').exists() else ROOT / 'package'
 font_dir = Path(os.environ.get('UNIXNU_UEFI') or ROOT / 'uefi-tb128fu') / 'Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib'
 record = json.loads((ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json').read_text().strip().rstrip(','))
 source = sources / 'BootProgress.c'
