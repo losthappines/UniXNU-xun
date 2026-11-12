@@ -185,8 +185,6 @@ kernel_args = [
   "native-emmc-root=1",
   "native-emmc-diagnostics=2",
   "sheng-data-persist=2",
-  "cs_enforcement_disable=1",
-  "amfi_get_out_of_my_way=1",
 ]
 
 [payload.adt]

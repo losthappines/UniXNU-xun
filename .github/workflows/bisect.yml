@@ -33,6 +33,9 @@ on:
       fix_cluster:
         description: "true = mask cluster-type properties in payload ADT (MAX_CPU_CLUSTERS=1)"
         default: "false"
+      fix_bootargs:
+        description: "true = remove cs_enforcement_disable=1 and amfi_get_out_of_my_way=1 from EFI/UniXNU/unixnu.toml"
+        default: "false"
 
 jobs:
   bisect:
@@ -119,6 +122,20 @@ jobs:
             python3 UniXNU-xun/scripts/inspect-adt.py adt.bin --smp
             mdel -i payload.img ::EFI/UniXNU/Payloads/kernel.macho.adt
             mcopy -i payload.img adt.bin ::EFI/UniXNU/Payloads/kernel.macho.adt
+          fi
+          if [ "${{ inputs.fix_bootargs }}" = "true" ]; then
+            mcopy -i payload.img ::EFI/UniXNU/unixnu.toml unixnu.toml
+            python3 -c "
+            from pathlib import Path
+            p = Path('unixnu.toml')
+            s = p.read_text()
+            for bad in [' cs_enforcement_disable=1', 'cs_enforcement_disable=1', ' amfi_get_out_of_my_way=1', 'amfi_get_out_of_my_way=1']:
+                s = s.replace(bad, '')
+            p.write_text(s)
+            print('Updated unixnu.toml:\n' + s)
+            "
+            mdel -i payload.img ::EFI/UniXNU/unixnu.toml
+            mcopy -i payload.img unixnu.toml ::EFI/UniXNU/unixnu.toml
           fi
           mdir -i payload.img ::EFI/UniXNU/Payloads
           mkdir -p out
