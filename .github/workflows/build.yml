@@ -211,6 +211,15 @@ jobs:
         working-directory: UniXNU
         run: |
           cp -r ../UniXNU-xun/uefi/Resources/* ../Mu-Silicium/Resources/
+          python3 - <<'PY'
+          from pathlib import Path
+          shim = Path('../Mu-Silicium/BootShim/BootShim.S')
+          text = shim.read_text()
+          old = '.quad FD_SIZE'
+          new = '.quad FD_SIZE + (_Payload - _Head)'
+          assert old in text, 'Unexpected BootShim.S layout'
+          shim.write_text(text.replace(old, new, 1))
+          PY
           FD_PATH=$(find ../ci-artifacts/xun-uefi -name 'SILICIUM_UEFI.fd' | head -n 1)
           RAMDISK_PATH=$(find ../ci-artifacts/xun-kernel-payload -name 'payload.img' | head -n 1)
           echo "Using FD: $FD_PATH"
