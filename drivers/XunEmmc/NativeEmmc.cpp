@@ -21,52 +21,55 @@ const char *volatile native_emmc_root_failure = nullptr;
 }
 
 class NativeEmmc : public IOService {
-  OSDeclareDefaultStructors (NativeEmmc)
-  OSSharedPtr<IOMemoryMap> fMap;
-  RootLayout fLayout;
+    OSDeclareDefaultStructors (NativeEmmc)
+    IOMemoryMap *fMap;
+    RootLayout fLayout;
 
 public:
-  IOService *probe (IOService *provider, SInt32 *score) override;
-  bool start (IOService *provider) override;
-  void stop (IOService *provider) override;
+    IOService *probe (IOService *provider, SInt32 *score) override;
+    bool start (IOService *provider) override;
+    void stop (IOService *provider) override;
 };
 
 OSDefineMetaClassAndStructors (NativeEmmc, IOService)
 
 IOService *NativeEmmc::probe (IOService *provider, SInt32 *score)
 {
-  native_emmc_probe_calls++;
-  if (!IOService::probe (provider, score)) {
-    return nullptr;
-  }
-  native_emmc_matched++;
-  *score = 2000;
-  return this;
+    native_emmc_probe_calls = native_emmc_probe_calls + 1;
+    if (!IOService::probe (provider, score)) {
+        return nullptr;
+    }
+    native_emmc_matched = native_emmc_matched + 1;
+    *score = 2000;
+    return this;
 }
 
 bool NativeEmmc::start (IOService *provider)
 {
-  if (!IOService::start (provider)) {
-    return false;
-  }
-  native_emmc_root_step = 1;
+    if (!IOService::start (provider)) {
+        return false;
+    }
+    native_emmc_root_step = 1;
 
-  // Map SDHCI MMIO at 0x04744000
-  fMap = provider->mapDeviceMemoryWithIndex (0);
-  if (!fMap) {
-    native_emmc_root_failure = "SDHCI MMIO map failed";
-    return false;
-  }
-  native_emmc_mapped = 1;
-  native_emmc_root_step = 2;
+    // Map SDHCI MMIO at 0x04744000
+    fMap = provider->mapDeviceMemoryWithIndex (0);
+    if (!fMap) {
+        native_emmc_root_failure = "SDHCI MMIO map failed";
+        return false;
+    }
+    native_emmc_mapped = 1;
+    native_emmc_root_step = 2;
 
-  // Register service
-  registerService ();
-  return true;
+    // Register service
+    registerService ();
+    return true;
 }
 
 void NativeEmmc::stop (IOService *provider)
 {
-  fMap.reset ();
-  IOService::stop (provider);
+    if (fMap) {
+        fMap->release ();
+        fMap = nullptr;
+    }
+    IOService::stop (provider);
 }
