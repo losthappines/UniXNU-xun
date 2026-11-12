@@ -58,6 +58,7 @@ archives = [
   "build-arm-driver.py SoftwareAES",
   # NativeEmmc: Qualcomm SDHCI MSM (sdhci@4744000) for eMMC 5.1
   "build-xun-emmc.py",
+  "audit-storage-interface.py",
   "build-arm-driver.py VirtioMmioBlock --verified-root",
   "build-virtio-mmio-bindings.py --component VirtioMmioBlock --directory build/virtio-mmio-block-verified",
   "build-arm-driver.py RamBlock",
@@ -65,7 +66,8 @@ archives = [
   "build-software-aes-bindings.py",
   "build-libpthread-kernel.py",
   "build-link-stubs.py",
-  "build-platform-power.py",
+    "build-arm-driver.py NativeLegacyDisplay",
+  "build-arm-driver.py NativeGOPPresenter",
   # The 395-byte owner root anchor and the XNU crypto adapter; the signed envelopes are in userdata,
   # built with `unixnu build userdata --root-policy OS=... --root-policy SystemOS=...`.
   "build-verified-root-key.py --pin 70a5ea346d2d779a7ef43eb4ed8b17f54488e160d8c2a6d6420969664e3ae798",
