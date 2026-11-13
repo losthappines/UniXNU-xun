@@ -358,6 +358,9 @@ bool NativeUfs::start(IOService *provider) {
   uint32_t dmaArg = 0;
   PE_parse_boot_argn("native-emmc-dma", &dmaArg, sizeof(dmaArg));
   native_emmc_dma_enabled = dmaArg ? 1U : 0U;
+  IOLog("NativeEmmc: starting probe on %s (dma=%u)\n",
+        provider && provider->getName() ? provider->getName() : "sdhci",
+        static_cast<unsigned>(native_emmc_dma_enabled));
 
   native_emmc_stage = 2;
   if (!state->sdhci.init(provider, dmaArg != 0U)) {
@@ -365,6 +368,11 @@ bool NativeUfs::start(IOService *provider) {
     native_emmc_last_err_int = state->sdhci.lastErrInt;
     native_emmc_last_int = state->sdhci.lastIntStatus;
     native_emmc_vendor_spec = state->sdhci.vendorSpec;
+    IOLog("NativeEmmc: sdhci.init failed stage=%u int=0x%x err=0x%x cmd=%u\n",
+          static_cast<unsigned>(state->sdhci.stage),
+          static_cast<unsigned>(state->sdhci.lastIntStatus),
+          static_cast<unsigned>(state->sdhci.lastErrInt),
+          static_cast<unsigned>(state->sdhci.lastCmd));
     return false;
   }
 
@@ -375,6 +383,11 @@ bool NativeUfs::start(IOService *provider) {
   native_emmc_host_version = state->sdhci.hostVersion;
   native_emmc_caps0 = state->sdhci.caps0;
   native_emmc_vendor_spec = state->sdhci.vendorSpec;
+  IOLog("NativeEmmc: eMMC ready rca=%u sectors=%llu fallback=%u hcVer=0x%x\n",
+        static_cast<unsigned>(state->sdhci.rca),
+        static_cast<unsigned long long>(state->sdhci.sectorCount),
+        static_cast<unsigned>(native_emmc_fallback_reinit),
+        static_cast<unsigned>(state->sdhci.hostVersion));
 
   native_emmc_stage = 3;
   uint8_t *scratch = static_cast<uint8_t *>(IOMallocZero(16384U));
@@ -389,6 +402,10 @@ bool NativeUfs::start(IOService *provider) {
     native_emmc_layout_fail = state->layout.failStep;
     native_emmc_last_err_int = state->sdhci.lastErrInt;
     native_emmc_last_int = state->sdhci.lastIntStatus;
+    IOLog("NativeEmmc: layout parse failed step=%u int=0x%x err=0x%x\n",
+          static_cast<unsigned>(state->layout.failStep),
+          static_cast<unsigned>(state->sdhci.lastIntStatus),
+          static_cast<unsigned>(state->sdhci.lastErrInt));
     return false;
   }
 
@@ -396,6 +413,13 @@ bool NativeUfs::start(IOService *provider) {
   native_emmc_userdata_last_lba = state->layout.userdataLastLba;
   state->dataWindow = state->layout.data;
   gCtrlState = state;
+  IOLog("NativeEmmc: userdata=%llu..%llu OS=%llu+%llu SystemOS=%llu+%llu\n",
+        static_cast<unsigned long long>(state->layout.userdataFirstLba),
+        static_cast<unsigned long long>(state->layout.userdataLastLba),
+        static_cast<unsigned long long>(state->layout.os.startLba),
+        static_cast<unsigned long long>(state->layout.os.sectorCount),
+        static_cast<unsigned long long>(state->layout.systemOs.startLba),
+        static_cast<unsigned long long>(state->layout.systemOs.sectorCount));
 
   native_emmc_stage = 4;
   // Ordered publication: SystemOS first, OS last so IOKitBSDInit mounts OS
@@ -405,6 +429,7 @@ bool NativeUfs::start(IOService *provider) {
       !systemOsDev->initWithWindow(state, state->layout.systemOs, XNU_OWNER_CACHE_VOLUME_UUID, true) ||
       !systemOsDev->attach(this) ||
       !systemOsDev->start(this)) {
+    IOLog("NativeEmmc: SystemOS block publish failed\n");
     return false;
   }
 
@@ -414,6 +439,7 @@ bool NativeUfs::start(IOService *provider) {
       !osDev->initWithWindow(state, state->layout.os, XNU_OWNER_ROOT_VOLUME_UUID, true) ||
       !osDev->attach(this) ||
       !osDev->start(this)) {
+    IOLog("NativeEmmc: OS block publish failed\n");
     return false;
   }
 
@@ -424,6 +450,7 @@ bool NativeUfs::start(IOService *provider) {
 
   native_emmc_stage = 6;
   native_emmc_ready = 1;
+  IOLog("NativeEmmc: SystemOS and OS block devices published\n");
   registerService();
   return true;
 }

@@ -13,7 +13,8 @@ namespace xun_emmc {
 
 constexpr uint64_t kSdhci1CqhciBase = 0x04745000ULL;
 constexpr uint64_t kSdhci1CqhciSize = 0x00001000ULL;
-constexpr uint64_t kGccSdcc1Base    = 0x00138000ULL;
+// SM6225 (khaje) GCC base is 0x01400000; SDCC1 CBCR block is at +0x38000.
+constexpr uint64_t kGccSdcc1Base    = 0x01438000ULL;
 constexpr uint64_t kGccSdcc1Size    = 0x00001000ULL;
 
 constexpr uint32_t kEmmcSectorBytes = 512U;
