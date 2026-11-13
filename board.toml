@@ -158,7 +158,7 @@ title = "iPadOS 17.7.11 (xun)"
 # DRAM base is 0x40000000. XNU spans from 0x40000000 across contiguous free DRAM.
 dram_size = "0x180000000"
 skip_setup_tool = "scripts/seed-data-skip-setup.py"
-skip_setup_args = ["--no-auto-dim", "--plain-framebuffer"]
+skip_setup_args = ["--no-auto-dim"]
 panic_screen = true
 entry_probe_reset_delay = 0
 entry_probe_reset_before = false
