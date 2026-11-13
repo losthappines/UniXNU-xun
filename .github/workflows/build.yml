@@ -136,10 +136,12 @@ jobs:
         working-directory: UniXNU
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          UNIXNU_UEFI: ${{ github.workspace }}/Mu-Silicium
         run: |
           export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
-          python3 unixnu ipsw fetch KernelCache -D ../UniXNU-xun
+          python3 unixnu ipsw fetch KernelCache OS -D ../UniXNU-xun
           python3 unixnu defconfig xun_defconfig -D ../UniXNU-xun
+          python3 ../UniXNU-xun/scripts/make-xun-data-seed.py --output out/xun-data.dbr --device ../UniXNU-xun --unixnu . --config auto
           python3 unixnu build kernel -D ../UniXNU-xun
           # Second pass links the real ShengPlatformPower.cpp against pass-1's kernel.macho instead of FirstPassStub.c.
           python3 unixnu build kernel -D ../UniXNU-xun
@@ -167,7 +169,7 @@ jobs:
           Path('out/original-static-system.bundle').write_bytes(bundle)
           print(f'Staged trust cache bundle ({len(bundle)} bytes, sha256 {sha})')
           PY
-          python3 unixnu build payload -D ../UniXNU-xun --trust-cache out/original-static-system.bundle
+          python3 unixnu build payload -D ../UniXNU-xun --trust-cache out/original-static-system.bundle --data-ramdisk out/xun-data.dbr --skip-setup
 
       - name: Upload Kernel, Payload & ADT Artifacts
         uses: actions/upload-artifact@v4

@@ -9,8 +9,3 @@ void sheng_pmgr_run(void);
 __attribute__((weak)) void sheng_pmgr_run(void)
 {
 }
-
-void native_verified_root_probe(void);
-__attribute__((weak)) void native_verified_root_probe(void)
-{
-}

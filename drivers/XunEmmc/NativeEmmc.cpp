@@ -47,6 +47,12 @@ volatile uint64_t native_emmc_userdata_last_lba = 0;
 volatile uint64_t native_emmc_reads = 0;
 volatile uint64_t native_emmc_read_errors = 0;
 
+volatile uint64_t native_ufs_block_reads = 0;
+volatile uint64_t native_ufs_verified_blocks = 0;
+volatile uint64_t native_ufs_block_failures = 0;
+volatile uint32_t native_ufs_integrity_failures = 0;
+volatile uint32_t native_ufs_blocks_published = 0;
+
 volatile uint32_t native_verified_block_root_device = 0;
 volatile uint32_t native_verified_block_root_media_matches = 0;
 volatile uint32_t native_verified_block_root_provider_depth = 0;
@@ -296,15 +302,19 @@ IOReturn NativeEmmcBlock::doAsyncReadWrite(IOMemoryDescriptor *buffer, UInt64 bl
       native_emmc_last_err_int = ctrl->sdhci.lastErrInt;
       native_emmc_last_int = ctrl->sdhci.lastIntStatus;
       native_emmc_read_errors = ctrl->sdhci.readErrors;
+      native_ufs_block_failures = native_ufs_block_failures + 1U;
       result = kIOReturnIOError;
       break;
     }
     const uint32_t chunkBytes = chunkSectors * kEmmcSectorBytes;
     if (buffer->writeBytes(actual, ctrl->bounceBuf, chunkBytes) != chunkBytes) {
+      native_ufs_block_failures = native_ufs_block_failures + 1U;
       result = kIOReturnIOError;
       break;
     }
     actual += chunkBytes;
+    native_ufs_block_reads = native_ufs_block_reads + chunkSectors;
+    native_ufs_verified_blocks = native_ufs_verified_blocks + chunkSectors;
     result = kIOReturnSuccess;
   }
   native_emmc_reads = ctrl->sdhci.readOps;
@@ -434,6 +444,7 @@ bool NativeUfs::start(IOService *provider) {
     IOLog("NativeEmmc: SystemOS block publish failed\n");
     return false;
   }
+  native_ufs_blocks_published = 1;
 
   native_emmc_stage = 5;
   osDev = new NativeEmmcBlock;
@@ -444,6 +455,7 @@ bool NativeUfs::start(IOService *provider) {
     IOLog("NativeEmmc: OS block publish failed\n");
     return false;
   }
+  native_ufs_blocks_published = 2;
 
   setProperty("EmmcSectors", static_cast<unsigned long long>(state->sdhci.sectorCount), 64);
   setProperty("UserdataFirstLBA", static_cast<unsigned long long>(state->layout.userdataFirstLba), 64);
@@ -567,6 +579,7 @@ int verifiedVolumeQuery(dev_t device, const char *requestedUuid, uint8_t manifes
   native_verified_block_root_media_matches = matches;
   native_verified_block_root_provider_depth = depth;
   if (!authenticated || matches != 1) {
+    native_ufs_integrity_failures = native_ufs_integrity_failures + 1U;
     if (manifestDigest) bzero(manifestDigest, SHA384_DIGEST_LENGTH);
     printf("NativeEmmc: verify FAIL dev=0x%x (%d,%d) req=%s seen=%s matches=%u depth=%u reason=%s\n",
            static_cast<unsigned>(devRaw), static_cast<int>(major(devRaw)), static_cast<int>(minor(devRaw)),
@@ -714,63 +727,85 @@ extern "C" int native_ufs_block_authenticates(IOService *provider, const char *u
   return block->authenticatesVolume(uuid, digest) ? 1 : 0;
 }
 
-// Persistent Data window hooks (used if NativeRamBlock / Data store is enabled).
+namespace {
+
+constexpr uint64_t kStoreBlockBytes = 4096ULL;
+constexpr uint64_t kStoreSectorsPerBlock = kStoreBlockBytes / kEmmcSectorBytes;
+
+int storeTransfer(uint64_t block, uint32_t count, void *readDst, const void *writeSrc, bool flush) {
+  if (!gCtrlState || !gCtrlState->dataStoreOpen || !count || (!readDst && !writeSrc)) return 0;
+  const uint64_t totalBlocks = gCtrlState->dataWindow.byteSize / kStoreBlockBytes;
+  if (block >= totalBlocks || count > totalBlocks - block) return 0;
+  const uint64_t sectors64 = static_cast<uint64_t>(count) * kStoreSectorsPerBlock;
+  if (sectors64 > UINT32_MAX) return 0;
+  const uint64_t lba = gCtrlState->dataWindow.startLba + block * kStoreSectorsPerBlock;
+  const uint32_t sectors = static_cast<uint32_t>(sectors64);
+
+  IOLockLock(gCtrlState->gate);
+  bool ok = false;
+  if (readDst) {
+    ok = gCtrlState->sdhci.readSectors(lba, sectors, readDst);
+  } else {
+    ok = gCtrlState->sdhci.writeSectors(lba, sectors, writeSrc);
+    if (ok && flush) ok = gCtrlState->sdhci.flushCache();
+  }
+  IOLockUnlock(gCtrlState->gate);
+  return ok ? 1 : 0;
+}
+
+}  // namespace
+
+extern "C" void native_ufs_progress_text(char *dst, size_t size) {
+  if (!dst || !size) return;
+  snprintf(dst, size,
+           "emmc st=%u rdy=%u pub=%u r=%llu err=%llu sec=%llu",
+           static_cast<unsigned>(native_emmc_stage),
+           static_cast<unsigned>(native_emmc_ready),
+           static_cast<unsigned>(native_ufs_blocks_published),
+           static_cast<unsigned long long>(native_emmc_reads),
+           static_cast<unsigned long long>(native_emmc_read_errors),
+           static_cast<unsigned long long>(native_emmc_sectors));
+}
+
+// Persistent Data window hooks (NativeRamBlock / PersistOverlay expect 4096-byte blocks and 1=ok, 0=fail).
 extern "C" unsigned native_ufs_store_mode(void) {
   return (gCtrlState && gCtrlState->dataWindow.present) ? 1U : 0U;
 }
 
-extern "C" int native_ufs_store_open(uint64_t minBytes, uint64_t *actualBytes, const char **kind) {
+extern "C" int native_ufs_store_open(uint64_t minBlocks, uint64_t *firstLbaOut, const char **kind) {
+  if (!gCtrlState || !gCtrlState->dataWindow.present) {
+    if (kind) *kind = "emmc: no data window";
+    return 0;
+  }
+  if (minBlocks > UINT64_MAX / kStoreBlockBytes ||
+      gCtrlState->dataWindow.byteSize < minBlocks * kStoreBlockBytes) {
+    if (kind) *kind = "emmc: data window too small";
+    return 0;
+  }
   if (kind) *kind = "emmc";
-  if (!gCtrlState || !gCtrlState->dataWindow.present) return -1;
-  if (gCtrlState->dataWindow.byteSize < minBytes) return -1;
-  if (actualBytes) *actualBytes = gCtrlState->dataWindow.byteSize;
+  if (firstLbaOut) *firstLbaOut = gCtrlState->dataWindow.startLba;
   gCtrlState->dataStoreOpen = true;
-  return 0;
+  return 1;
 }
 
-extern "C" int native_ufs_store_read(uint64_t offset, uint32_t bytes, void *dst) {
-  if (!gCtrlState || !gCtrlState->dataStoreOpen || !dst) return -1;
-  if ((offset % kEmmcSectorBytes) || (bytes % kEmmcSectorBytes)) return -1;
-  if (offset > gCtrlState->dataWindow.byteSize || bytes > gCtrlState->dataWindow.byteSize - offset) return -1;
-  IOLockLock(gCtrlState->gate);
-  bool ok = gCtrlState->sdhci.readSectors(
-      gCtrlState->dataWindow.startLba + (offset / kEmmcSectorBytes),
-      bytes / kEmmcSectorBytes, dst);
-  IOLockUnlock(gCtrlState->gate);
-  return ok ? 0 : -1;
+extern "C" int native_ufs_store_read(uint64_t block, uint32_t count, void *dst) {
+  return storeTransfer(block, count, dst, nullptr, false);
 }
 
-extern "C" int native_ufs_store_write(uint64_t offset, uint32_t bytes, const void *src) {
-  if (!gCtrlState || !gCtrlState->dataStoreOpen || !src) return -1;
-  if ((offset % kEmmcSectorBytes) || (bytes % kEmmcSectorBytes)) return -1;
-  if (offset > gCtrlState->dataWindow.byteSize || bytes > gCtrlState->dataWindow.byteSize - offset) return -1;
-  IOLockLock(gCtrlState->gate);
-  bool ok = gCtrlState->sdhci.writeSectors(
-      gCtrlState->dataWindow.startLba + (offset / kEmmcSectorBytes),
-      bytes / kEmmcSectorBytes, src);
-  if (ok) gCtrlState->sdhci.flushCache();
-  IOLockUnlock(gCtrlState->gate);
-  return ok ? 0 : -1;
+extern "C" int native_ufs_store_write(uint64_t block, uint32_t count, const void *src) {
+  return storeTransfer(block, count, nullptr, src, true);
 }
 
-extern "C" int native_ufs_store_write_cached(uint64_t offset, uint32_t bytes, const void *src) {
-  if (!gCtrlState || !gCtrlState->dataStoreOpen || !src) return -1;
-  if ((offset % kEmmcSectorBytes) || (bytes % kEmmcSectorBytes)) return -1;
-  if (offset > gCtrlState->dataWindow.byteSize || bytes > gCtrlState->dataWindow.byteSize - offset) return -1;
-  IOLockLock(gCtrlState->gate);
-  bool ok = gCtrlState->sdhci.writeSectors(
-      gCtrlState->dataWindow.startLba + (offset / kEmmcSectorBytes),
-      bytes / kEmmcSectorBytes, src);
-  IOLockUnlock(gCtrlState->gate);
-  return ok ? 0 : -1;
+extern "C" int native_ufs_store_write_cached(uint64_t block, uint32_t count, const void *src) {
+  return storeTransfer(block, count, nullptr, src, false);
 }
 
 extern "C" int native_ufs_store_sync(void) {
-  if (!gCtrlState || !gCtrlState->dataStoreOpen) return -1;
+  if (!gCtrlState || !gCtrlState->dataStoreOpen) return 0;
   IOLockLock(gCtrlState->gate);
   bool ok = gCtrlState->sdhci.flushCache();
   IOLockUnlock(gCtrlState->gate);
-  return ok ? 0 : -1;
+  return ok ? 1 : 0;
 }
 
 extern "C" unsigned native_ufs_store_gpt_check(void) {

@@ -58,9 +58,11 @@ archives = [
   "build-arm-driver.py SoftwareAES",
   # NativeEmmc: Qualcomm SDHCI MSM (sdhci@4744000) for eMMC 5.1
   "build-xun-emmc.py",
+  "build-xun-ramblock.py",
   "build-software-aes-bindings.py",
   "build-libpthread-kernel.py",
   "build-link-stubs.py",
+  "build-boot-progress.py",
   "build-platform-power.py",
 ]
 
@@ -170,7 +172,7 @@ trust_cache_sha256 = [
 # through the userdata store window (a seed above 2 GiB has no volatile backing).
 kernel_args = [
   "-v",
-  "serial=0",
+  "serial=3",
   "-progress",
   "debug=0x14e",
   "kt_fixed_zones=120",
@@ -185,6 +187,11 @@ kernel_args = [
   "native-emmc-root=1",
   "native-emmc-diagnostics=2",
   "sheng-data-persist=2",
+  "boot-progress=2",
+  "boot-payload-release=1",
+  "kern.maxvnodes=1200",
+  "sheng-disable-watchdogd=1",
+  "sheng-disable-jobs=1",
 ]
 
 [payload.adt]
