@@ -12,6 +12,7 @@ from pathlib import Path
 import plistlib
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -64,19 +65,6 @@ def hdiutil_attach_plist(args):
     return plistlib.loads(res.stdout)
 
 
-def find_synthesized_apfs_volume(whole_dev, vol_name='Data'):
-    res = subprocess.run(['diskutil', 'apfs', 'list', '-plist'], check=True, capture_output=True)
-    plist = plistlib.loads(res.stdout)
-    whole_name = Path(whole_dev).name
-    for container in plist.get('Containers', []):
-        stores = [s.get('DeviceIdentifier', '') for s in container.get('PhysicalStores', [])]
-        if any(s == whole_name or s.startswith(whole_name + 's') for s in stores):
-            for vol in container.get('Volumes', []):
-                if vol.get('Name') == vol_name or len(container.get('Volumes', [])) == 1:
-                    return '/dev/' + vol['DeviceIdentifier'], vol.get('MountPoint')
-    return None, None
-
-
 def detach_best_effort(dev_node):
     if not dev_node:
         return
@@ -84,27 +72,63 @@ def detach_best_effort(dev_node):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def ensure_runtime_dirs(data_root):
-    dirs = [
+def merge_pref(mount, home, name, values):
+    path = mount / home / 'Library/Preferences' / (name + '.plist')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = plistlib.loads(path.read_bytes()) if path.is_file() else {}
+    content.update(values)
+    path.write_bytes(plistlib.dumps(content, fmt=plistlib.FMT_BINARY))
+    path.chmod(0o644)
+
+
+def populate_data_root(os_var, data_root):
+    for current, dirs, files in os.walk(os_var, followlinks=False):
+        dirs[:] = [name for name in dirs if name != 'staged_system_apps']
+        dest = data_root / Path(current).relative_to(os_var)
+        dest.mkdir(exist_ok=True)
+        dest.chmod(stat.S_IMODE(Path(current).stat().st_mode))
+        for name in list(dirs) + files:
+            src, dst = Path(current) / name, dest / name
+            if src.is_symlink():
+                if not dst.exists() and not dst.is_symlink():
+                    dst.symlink_to(os.readlink(src))
+                if name in dirs:
+                    dirs.remove(name)
+            elif src.is_file():
+                shutil.copy2(src, dst)
+
+    runtime_dirs = [
+        ('keybags', 0o755),
+        ('Keychains', 0o755),
+        ('mobile', 0o755),
+        ('mobile/tmp', 0o755),
+        ('mobile/Library', 0o755),
+        ('mobile/Library/Preferences', 0o755),
+        ('root', 0o755),
         ('tmp', 0o1777),
         ('run', 0o755),
         ('folders', 0o755),
         ('db', 0o755),
         ('log', 0o755),
         ('logs', 0o755),
-        ('mobile', 0o755),
-        ('mobile/Library', 0o755),
-        ('mobile/Library/Preferences', 0o755),
-        ('root', 0o755),
-        ('containers', 0o755),
         ('empty', 0o755),
-        ('Keychains', 0o755),
+        ('containers/Bundle', 0o755),
+        ('containers/Data/System', 0o755),
+        ('containers/Shared/SystemGroup', 0o755),
+        ('containers/Temp', 0o755),
     ]
-    for rel, mode in dirs:
+    for rel, mode in runtime_dirs:
         target = data_root / rel
-        if not target.exists() and not target.is_symlink():
-            target.mkdir(parents=True, exist_ok=True)
-            os.chmod(target, mode)
+        target.mkdir(parents=True, exist_ok=True)
+        os.chmod(target, mode)
+
+    for home in ('root', 'mobile'):
+        for name in ('backboardd', '.GlobalPreferences'):
+            merge_pref(data_root, home, name, {
+                'CAEnableDeepFramebuffer': False,
+                'CAEnableFramebufferCompression': False,
+                'CAEnableIOSurfaceCompression': False,
+            })
 
 
 def update_dot_config_uuid(config_path, uuid_str):
@@ -141,7 +165,6 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.unlink(missing_ok=True)
 
-    logical_bytes = args.size_mb * 1024 * 1024
     os_dev = None
     raw_dev = None
 
@@ -151,9 +174,7 @@ def main():
         data_mnt = tmp / 'data_mnt'
         os_mnt.mkdir()
         data_mnt.mkdir()
-        raw_img = tmp / 'data.raw'
-        with raw_img.open('wb') as f:
-            f.truncate(logical_bytes)
+        raw_img = tmp / 'seed.cdr'
 
         try:
             os_plist = hdiutil_attach_plist([
@@ -164,39 +185,32 @@ def main():
                 if e.get('dev-entry', '').startswith('/dev/disk')
             )
 
-            raw_plist = hdiutil_attach_plist([
-                '-imagekey', 'diskimage-class=CRawDiskImage', '-nomount', '-nobrowse', str(raw_img),
+            # Bare APFS container (-layout NONE -> NXSB at offset 0, matching seed-data-skip-setup.py).
+            subprocess.run([
+                'hdiutil', 'create', '-size', f'{args.size_mb}m', '-layout', 'NONE',
+                '-fs', 'APFS', '-volname', 'Data', '-type', 'UDTO', str(raw_img),
+            ], check=True)
+            data_plist = hdiutil_attach_plist([
+                '-nobrowse', '-owners', 'off', '-mountpoint', str(data_mnt), str(raw_img),
             ])
-            raw_dev = next(
-                e['dev-entry'] for e in raw_plist.get('system-entities', [])
-                if e.get('dev-entry', '').startswith('/dev/disk') and 's' not in Path(e['dev-entry']).name[4:]
-            )
-
-            # Bare APFS container (NXSB at offset 0): native 4096-byte APFS blocks without 512B GPT mismatch.
-            subprocess.run(['diskutil', 'apfs', 'create', raw_dev, 'Data'], check=True)
-            vol_dev, auto_mnt = find_synthesized_apfs_volume(raw_dev, 'Data')
-            require(vol_dev is not None, f'Failed to locate synthesized APFS Data volume on {raw_dev}')
-            if auto_mnt:
-                subprocess.run(['diskutil', 'unmount', 'force', vol_dev], check=True)
-            subprocess.run(['diskutil', 'mount', '-mountPoint', str(data_mnt), vol_dev], check=True)
+            raw_dev = data_plist['system-entities'][0]['dev-entry']
 
             src_var = os_mnt / 'private/var'
             require(src_var.is_dir(), f'Missing /private/var inside OS DMG {os_dmg}')
-            for entry in sorted(src_var.iterdir()):
-                if entry.name == 'staged_system_apps':
-                    continue
-                dst_entry = data_mnt / entry.name
-                if entry.is_dir() and not entry.is_symlink():
-                    subprocess.run(['ditto', str(entry), str(dst_entry)], check=True)
-                else:
-                    shutil.copy2(entry, dst_entry, follow_symlinks=False)
+            populate_data_root(src_var, data_mnt)
+            require((data_mnt / 'mobile').is_dir(), f'Data seed missing /mobile after copy into {data_mnt}')
 
-            ensure_runtime_dirs(data_mnt)
             subprocess.run(['sync'], check=True)
-            subprocess.run(['diskutil', 'unmount', vol_dev], check=True)
+            subprocess.run(['hdiutil', 'detach', raw_dev], check=True)
+            raw_dev = None
         finally:
             detach_best_effort(raw_dev)
             detach_best_effort(os_dev)
+
+        header = raw_img.read_bytes()[:4096]
+        require(header[32:36] == b'NXSB', f'Expected bare APFS NXSB at offset 32 in {raw_img}')
+        block_size = int.from_bytes(header[36:40], 'little')
+        require(block_size == 4096, f'Expected 4096-byte APFS block size, got {block_size}')
 
         packed_ramdisk.pack(raw_img, out_path)
 
