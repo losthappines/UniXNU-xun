@@ -139,6 +139,15 @@ jobs:
           UNIXNU_UEFI: ${{ github.workspace }}/Mu-Silicium
         run: |
           export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/build-xnu-4k-baseline.sh')
+          text = p.read_text()
+          old = '{ [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" != 1 ] && [ "${XNU_SOURCE_STORAGE:-0}" != 1 ]; }'
+          new = '{ [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" != 1 ] && [ "${XNU_SOURCE_STORAGE:-0}" != 1 ] && [ "${XNU_NATIVE_UFS:-0}" != 1 ]; }'
+          assert old in text, 'Expected OWNER_ROOT_TRUST guard not found in build-xnu-4k-baseline.sh'
+          p.write_text(text.replace(old, new, 1))
+          PY
           python3 unixnu ipsw fetch KernelCache OS -D ../UniXNU-xun
           python3 unixnu defconfig xun_defconfig -D ../UniXNU-xun
           python3 ../UniXNU-xun/scripts/make-xun-data-seed.py --output out/xun-data.dbr --device ../UniXNU-xun --unixnu . --config auto
