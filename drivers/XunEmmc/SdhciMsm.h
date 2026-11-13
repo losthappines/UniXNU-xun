@@ -316,7 +316,7 @@ struct SdhciController {
     w16(kIntStatus, 0xFFFFU);
     w16(kErrIntStatus, 0xFFFFU);
     w32(kArgument, arg);
-    w16(kCommand, static_cast<uint16_t>((cmdIdx << 8) | (cmdFlags & 0xFFU)));
+    w16(kCommand, static_cast<uint16_t>((static_cast<uint32_t>(cmdIdx) << 8) | (cmdFlags & 0xFFU)));
 
     uint16_t st = 0;
     for (uint32_t t = 0; t < 500000U; ++t) {
@@ -544,11 +544,14 @@ struct SdhciController {
   bool allocateDmaBuffers() {
     if (dmaDesc && admaDesc) return true;
     const uint64_t mask = useAdma64 ? 0xFFFFFFFFFFFFFFFFULL : 0x00000000FFFFFFFFULL;
+    const IOOptionBits bufOpts =
+        static_cast<IOOptionBits>(kIODirectionInOut) |
+        static_cast<IOOptionBits>(kIOMemoryPhysicallyContiguous);
     dmaDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(
-        kernel_task, kIODirectionInOut | kIOMemoryPhysicallyContiguous,
+        kernel_task, bufOpts,
         kMaxChunkSectors * kEmmcSectorBytes, mask);
     admaDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(
-        kernel_task, kIODirectionInOut | kIOMemoryPhysicallyContiguous,
+        kernel_task, bufOpts,
         4096U, mask);
     if (!dmaDesc || !admaDesc ||
         dmaDesc->prepare() != kIOReturnSuccess ||

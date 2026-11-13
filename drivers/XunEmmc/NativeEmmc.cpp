@@ -462,8 +462,9 @@ int verifiedVolumeQuery(dev_t device, const char *requestedUuid, uint8_t manifes
 
   OSDictionary *matching = IOService::serviceMatching("IOMedia");
   OSDictionary *properties = OSDictionary::withCapacity(2);
-  OSNumber *wantedMajor = OSNumber::withNumber(static_cast<unsigned long long>(major(device)), 32);
-  OSNumber *wantedMinor = OSNumber::withNumber(static_cast<unsigned long long>(minor(device)), 32);
+  const uint32_t devRaw = static_cast<uint32_t>(device);
+  OSNumber *wantedMajor = OSNumber::withNumber(static_cast<unsigned long long>(major(devRaw)), 32);
+  OSNumber *wantedMinor = OSNumber::withNumber(static_cast<unsigned long long>(minor(devRaw)), 32);
   if (!matching || !properties || !wantedMajor || !wantedMinor) {
     OSSafeReleaseNULL(wantedMinor);
     OSSafeReleaseNULL(wantedMajor);
@@ -579,7 +580,8 @@ extern "C" int native_verified_block_volume_device(const char *uuid, dev_t *devi
         mjr->unsigned64BitValue() > 255 || mnr->unsigned64BitValue() > 0xffffff) {
       continue;
     }
-    candidate = static_cast<dev_t>(makedev(mjr->unsigned32BitValue(), mnr->unsigned32BitValue()));
+    candidate = static_cast<dev_t>(makedev(static_cast<int>(mjr->unsigned32BitValue()),
+                                           static_cast<int>(mnr->unsigned32BitValue())));
     if (!native_verified_block_root_authorized(candidate)) continue;
     snprintf(candidatePath, sizeof(candidatePath), "/dev/%s", name->getCStringNoCopy());
     authenticated = true;
