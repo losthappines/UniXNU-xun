@@ -56,6 +56,8 @@ char native_verified_block_root_uuid[37] = {};
 
 extern const uint8_t verified_root_key[] __attribute__((weak_import));
 
+int printf(const char *format, ...) __printflike(1, 2);
+
 int native_verified_block_root_authorized(dev_t device);
 int native_verified_block_manifest_sha384(dev_t device, const char *uuid, uint8_t digest[48]);
 int native_verified_block_volume_device(const char *uuid, dev_t *device, char *path, size_t size);
@@ -514,30 +516,48 @@ int verifiedVolumeQuery(dev_t device, const char *requestedUuid, uint8_t manifes
   unsigned matches = 0;
   unsigned depth = 0;
   bool authenticated = false;
+  const char *failReason = "no-match";
+  char seenUuid[37] = {};
 
   while (OSObject *object = iterator->getNextObject()) {
     IOService *service = OSDynamicCast(IOService, object);
     if (!service) continue;
     if (++matches != 1) {
       authenticated = false;
+      failReason = "duplicate-dev";
       break;
     }
 
     OSString *uuid = OSDynamicCast(OSString, service->getProperty("UUID"));
-    if (!uuid || uuid->getLength() != 36) continue;
-    if (requestedUuid && !asciiCaseEquals(uuid->getCStringNoCopy(), requestedUuid)) continue;
-    strlcpy(native_verified_block_root_uuid, uuid->getCStringNoCopy(),
-            sizeof(native_verified_block_root_uuid));
+    if (!uuid || uuid->getLength() != 36) {
+      failReason = uuid ? "bad-uuid-len" : "missing-uuid";
+      continue;
+    }
+    strlcpy(seenUuid, uuid->getCStringNoCopy(), sizeof(seenUuid));
+    if (requestedUuid && !asciiCaseEquals(seenUuid, requestedUuid)) {
+      failReason = "uuid-mismatch";
+      continue;
+    }
+    strlcpy(native_verified_block_root_uuid, seenUuid, sizeof(native_verified_block_root_uuid));
 
+    failReason = "no-emmc-provider";
     IOService *provider = service->getProvider();
-    for (unsigned step = 0; provider && step < 16; ++step, provider = provider->getProvider()) {
+    for (unsigned step = 0; provider && step < 64; ++step, provider = provider->getProvider()) {
       depth = step + 1;
       NativeEmmcBlock *block = OSDynamicCast(NativeEmmcBlock, provider);
       if (block) {
-        authenticated = block->authenticatesVolume(uuid->getCStringNoCopy(), manifestDigest);
+        authenticated = block->authenticatesVolume(seenUuid, manifestDigest);
         native_verified_block_root_uuid_match = authenticated ? 1U : 0U;
         native_verified_block_wrong_uuid_refused =
             !block->authenticatesVolume("00000000-0000-0000-0000-000000000000");
+        if (!authenticated) {
+          OSString *winProp = OSDynamicCast(OSString, block->getProperty("EmmcWindowName"));
+          printf("NativeEmmc: verify auth=0 dev=0x%x win=%s uuid=%s\n",
+                 static_cast<unsigned>(devRaw),
+                 winProp ? winProp->getCStringNoCopy() : "?",
+                 seenUuid);
+          failReason = "auth-rejected";
+        }
         break;
       }
     }
@@ -546,7 +566,16 @@ int verifiedVolumeQuery(dev_t device, const char *requestedUuid, uint8_t manifes
   iterator->release();
   native_verified_block_root_media_matches = matches;
   native_verified_block_root_provider_depth = depth;
-  return authenticated && matches == 1 ? 1 : 0;
+  if (!authenticated || matches != 1) {
+    if (manifestDigest) bzero(manifestDigest, SHA384_DIGEST_LENGTH);
+    printf("NativeEmmc: verify FAIL dev=0x%x (%d,%d) req=%s seen=%s matches=%u depth=%u reason=%s\n",
+           static_cast<unsigned>(devRaw), static_cast<int>(major(devRaw)), static_cast<int>(minor(devRaw)),
+           requestedUuid ? requestedUuid : "*",
+           seenUuid[0] ? seenUuid : "-",
+           matches, depth, failReason);
+    return 0;
+  }
+  return 1;
 }
 
 }  // namespace
@@ -558,7 +587,10 @@ extern "C" int native_verified_block_root_authorized(dev_t device) {
 extern "C" int native_verified_block_manifest_sha384(dev_t device, const char *uuid, uint8_t digest[48]) {
   if (!digest) return 0;
   bzero(digest, SHA384_DIGEST_LENGTH);
-  if (!uuid || strlen(uuid) != 36) return 0;
+  if (!uuid || strlen(uuid) != 36) {
+    printf("NativeEmmc: manifest FAIL bad uuid dev=0x%x\n", static_cast<unsigned>(device));
+    return 0;
+  }
   return verifiedVolumeQuery(device, uuid, digest);
 }
 
@@ -567,58 +599,113 @@ extern "C" int native_verified_block_volume_device(const char *uuid, dev_t *devi
   *device = NODEV;
   path[0] = '\0';
 
-  OSDictionary *matching = IOService::serviceMatching("IOMedia");
-  OSDictionary *properties = OSDictionary::withCapacity(1);
-  OSString *wanted = OSString::withCString(uuid);
-  if (!matching || !properties || !wanted) {
-    OSSafeReleaseNULL(wanted);
-    OSSafeReleaseNULL(properties);
-    OSSafeReleaseNULL(matching);
-    return 0;
+  constexpr unsigned kMaxAttempts = 300;
+  constexpr uint32_t kPollMs = 50;
+  unsigned lastMatches = 0;
+  bool lastHasIdentity = false;
+  bool lastHasBsd = false;
+
+  for (unsigned attempt = 0; attempt < kMaxAttempts; ++attempt) {
+    OSDictionary *matching = IOService::serviceMatching("IOMedia");
+    if (!matching) return 0;
+
+    OSIterator *iterator = IOService::getMatchingServices(matching);
+    matching->release();
+    if (!iterator) return 0;
+
+    unsigned matches = 0;
+    bool authenticated = false;
+    bool hasIdentity = false;
+    bool hasBsd = false;
+    bool fatalMismatch = false;
+    dev_t candidate = NODEV;
+    char candidatePath[64] = {};
+
+    while (OSObject *object = iterator->getNextObject()) {
+      IOService *media = OSDynamicCast(IOService, object);
+      if (!media) continue;
+      OSString *identity = OSDynamicCast(OSString, media->getProperty("UUID"));
+      if (!identity || !asciiCaseEquals(identity->getCStringNoCopy(), uuid)) continue;
+
+      hasIdentity = true;
+      if (++matches != 1) {
+        authenticated = false;
+        fatalMismatch = true;
+        break;
+      }
+
+      OSString *name = OSDynamicCast(OSString, media->getProperty(kIOBSDNameKey));
+      OSNumber *mjr = OSDynamicCast(OSNumber, media->getProperty(kIOBSDMajorKey));
+      OSNumber *mnr = OSDynamicCast(OSNumber, media->getProperty(kIOBSDMinorKey));
+      if (!name || !mjr || !mnr || !name->getLength() ||
+          name->getLength() >= sizeof(candidatePath) - 6 ||
+          name->getLength() >= size - 6 ||
+          mjr->unsigned64BitValue() > 255 || mnr->unsigned64BitValue() > 0xffffff) {
+        continue;
+      }
+
+      hasBsd = true;
+      candidate = static_cast<dev_t>(makedev(static_cast<int>(mjr->unsigned32BitValue()),
+                                             static_cast<int>(mnr->unsigned32BitValue())));
+      snprintf(candidatePath, sizeof(candidatePath), "/dev/%s", name->getCStringNoCopy());
+      if (!native_verified_block_root_authorized(candidate)) {
+        fatalMismatch = true;
+        break;
+      }
+      authenticated = true;
+    }
+
+    iterator->release();
+    lastMatches = matches;
+    lastHasIdentity = hasIdentity;
+    lastHasBsd = hasBsd;
+
+    if (authenticated && matches == 1) {
+      *device = candidate;
+      strlcpy(path, candidatePath, size);
+      printf("NativeEmmc: volume %s -> %s (0x%x) ready in %ums\n",
+             uuid, path, static_cast<unsigned>(candidate),
+             static_cast<unsigned>(attempt * kPollMs));
+      return 1;
+    }
+    if (fatalMismatch) {
+      printf("NativeEmmc: volume FAIL %s matches=%u path=%s dev=0x%x (fatal)\n",
+             uuid, matches, candidatePath[0] ? candidatePath : "-",
+             static_cast<unsigned>(candidate));
+      return 0;
+    }
+    if (attempt + 1 < kMaxAttempts) {
+      IOSleep(kPollMs);
+    }
   }
 
-  bool ready = properties->setObject("UUID", wanted) && matching->setObject("IOPropertyMatch", properties);
-  wanted->release();
-  properties->release();
-  OSIterator *iterator = ready ? IOService::getMatchingServices(matching) : nullptr;
-  matching->release();
-  if (!iterator) return 0;
+  printf("NativeEmmc: volume TIMEOUT %s after %ums (matches=%u id=%u bsd=%u)\n",
+         uuid, static_cast<unsigned>(kMaxAttempts * kPollMs), lastMatches,
+         lastHasIdentity ? 1U : 0U, lastHasBsd ? 1U : 0U);
 
-  unsigned matches = 0;
-  bool authenticated = false;
-  dev_t candidate = NODEV;
-  char candidatePath[64] = {};
-
-  while (OSObject *object = iterator->getNextObject()) {
-    IOService *media = OSDynamicCast(IOService, object);
-    if (!media) continue;
-    if (++matches != 1) {
-      authenticated = false;
-      break;
+  OSDictionary *dumpMatch = IOService::serviceMatching("IOMedia");
+  OSIterator *dumpIter = dumpMatch ? IOService::getMatchingServices(dumpMatch) : nullptr;
+  OSSafeReleaseNULL(dumpMatch);
+  if (dumpIter) {
+    unsigned idx = 0;
+    while (OSObject *obj = dumpIter->getNextObject()) {
+      IOService *media = OSDynamicCast(IOService, obj);
+      if (!media) continue;
+      OSString *id = OSDynamicCast(OSString, media->getProperty("UUID"));
+      OSString *bsd = OSDynamicCast(OSString, media->getProperty(kIOBSDNameKey));
+      OSString *content = OSDynamicCast(OSString, media->getProperty("Content"));
+      if (id || bsd) {
+        printf("NativeEmmc: IOMedia[%u] bsd=%s uuid=%s content=%s\n",
+               idx,
+               bsd ? bsd->getCStringNoCopy() : "-",
+               id ? id->getCStringNoCopy() : "-",
+               content ? content->getCStringNoCopy() : "-");
+      }
+      if (++idx >= 24) break;
     }
-    OSString *identity = OSDynamicCast(OSString, media->getProperty("UUID"));
-    OSString *name = OSDynamicCast(OSString, media->getProperty(kIOBSDNameKey));
-    OSNumber *mjr = OSDynamicCast(OSNumber, media->getProperty(kIOBSDMajorKey));
-    OSNumber *mnr = OSDynamicCast(OSNumber, media->getProperty(kIOBSDMinorKey));
-    if (!identity || !asciiCaseEquals(identity->getCStringNoCopy(), uuid) ||
-        !name || !mjr || !mnr || !name->getLength() ||
-        name->getLength() >= sizeof(candidatePath) - 6 ||
-        name->getLength() >= size - 6 ||
-        mjr->unsigned64BitValue() > 255 || mnr->unsigned64BitValue() > 0xffffff) {
-      continue;
-    }
-    candidate = static_cast<dev_t>(makedev(static_cast<int>(mjr->unsigned32BitValue()),
-                                           static_cast<int>(mnr->unsigned32BitValue())));
-    if (!native_verified_block_root_authorized(candidate)) continue;
-    snprintf(candidatePath, sizeof(candidatePath), "/dev/%s", name->getCStringNoCopy());
-    authenticated = true;
+    dumpIter->release();
   }
-
-  iterator->release();
-  if (!authenticated || matches != 1) return 0;
-  *device = candidate;
-  strlcpy(path, candidatePath, size);
-  return 1;
+  return 0;
 }
 
 extern "C" int native_ufs_block_authenticates(IOService *provider, const char *uuid, uint8_t *digest) {
