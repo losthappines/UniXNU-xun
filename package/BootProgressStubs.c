@@ -99,6 +99,16 @@ volatile uint32_t native_adreno_audit_attr;
  * (boot_reset_probe, boot_reset_bootloader) is package/BootReset.c. */
 struct native_adreno_client_record {char name[20]; uint32_t opens, refused, closes, slot, peak_mib, last_refusal;};
 struct native_adreno_asker_record {char name[20]; uint32_t reads;};
+struct native_adreno_metal_diag_view {
+  uint32_t opens, busy, bad, closes, reports, property_reads, foreign_opens, foreign_type, name_reads, calls, last_selector, last_status,
+      ext_entries, ext_selector, ext_status, ext_in, ext_out, tunnel_calls, probes, sel_bits[8], mb_maps, mb_calls, marks_total, marks[16],
+      chk_macf, chk_res, chk_type, type_pass_lo, type_pass_hi, attach_status, inflight, inflight_since_calls, forced_unmaps;
+  char opener[3][17], reader[3][17], name_reader[17], starter[3][17], report[64], report2[64];
+};
+struct native_adreno_open_record {char name[20]; uint32_t type, macf, res, attach, foreign;};
+__attribute__((weak)) struct native_adreno_metal_diag_view native_adreno_metal_diag;
+__attribute__((weak)) struct native_adreno_open_record native_adreno_open_log[8];
+__attribute__((weak)) volatile uint32_t native_adreno_open_log_count;
 unsigned boot_ui_trace_hot_rows(char a[][120], unsigned b) { (void)a;(void)b;return 0; }
 unsigned native_legacy_clients_dump(char *a, unsigned b) { (void)a;(void)b;return 0; }
 unsigned native_legacy_prepare_report(char *a, unsigned b) { (void)a;(void)b;return 0; }
