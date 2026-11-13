@@ -77,34 +77,40 @@ def _decode_im4p_kernelcache(im4p_path, out_path):
         fat_raw.unlink(missing_ok=True)
 
 
+def _find_glob(pattern):
+    roots = [ROOT, ROOT.parent]
+    if len(ROOT.parents) > 1:
+        roots.append(ROOT.parents[1])
+    if len(ROOT.parents) > 2:
+        roots.append(ROOT.parents[2] / 'out')
+    hits = []
+    for base in roots:
+        hits.extend(sorted(base.glob(pattern)))
+    return hits
+
+
 def find_original_kernelcache():
     candidates = [
         ROOT / '.cache/firmware/kernelcache.macho/kernelcache.release.ipad7.decompressed',
         *sorted(ROOT.glob('out/ipsw/*/kernelcache.decompressed')),
-        *sorted(ROOT.parent.glob('ipsw/*/kernelcache.decompressed')),
-        *sorted(ROOT.parents[1].glob('ipsw/*/kernelcache.decompressed')),
         *sorted(ROOT.glob('.cache/ipsw/*/kernelcache.decompressed')),
+        *_find_glob('ipsw/*/kernelcache.decompressed'),
     ]
     for path in candidates:
         if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == ORIGINAL_KERNELCACHE_SHA256:
             return path
 
     # Auto-fetch and decode KernelCache if not yet cached in out/ipsw/.
-    im4ps = [
-        *sorted(ROOT.glob('out/ipsw/*/kernelcache.release.ipad7')),
-        *sorted(ROOT.parent.glob('ipsw/*/kernelcache.release.ipad7')),
-    ]
-    if not im4ps and (ROOT / 'unixnu').is_file() and 'UNIXNU_DEVICE' in os.environ:
+    im4ps = _find_glob('ipsw/*/kernelcache.release.ipad7')
+    unixnu_cli = next((p / 'unixnu' for p in (ROOT, *ROOT.parents[:3]) if (p / 'unixnu').is_file()), None)
+    if not im4ps and unixnu_cli and 'UNIXNU_DEVICE' in os.environ:
         subprocess.run(
-            [sys.executable, str(ROOT / 'unixnu'), 'ipsw', 'fetch', 'KernelCache',
+            [sys.executable, str(unixnu_cli), 'ipsw', 'fetch', 'KernelCache',
              '-D', os.environ['UNIXNU_DEVICE']],
-            cwd=ROOT,
+            cwd=unixnu_cli.parent,
             check=True,
         )
-        im4ps = [
-            *sorted(ROOT.glob('out/ipsw/*/kernelcache.release.ipad7')),
-            *sorted(ROOT.parent.glob('ipsw/*/kernelcache.release.ipad7')),
-        ]
+        im4ps = _find_glob('ipsw/*/kernelcache.release.ipad7')
     if im4ps:
         out_kc = im4ps[0].parent / 'kernelcache.decompressed'
         _decode_im4p_kernelcache(im4ps[0], out_kc)

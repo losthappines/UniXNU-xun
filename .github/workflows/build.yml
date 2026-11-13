@@ -138,6 +138,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
+          python3 unixnu ipsw fetch KernelCache -D ../UniXNU-xun
           python3 unixnu defconfig xun_defconfig -D ../UniXNU-xun
           python3 unixnu build kernel -D ../UniXNU-xun
           # Second pass links the real ShengPlatformPower.cpp against pass-1's kernel.macho instead of FirstPassStub.c.
