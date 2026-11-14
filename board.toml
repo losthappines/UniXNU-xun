@@ -54,7 +54,7 @@ archives = [
   "build-corecrypto-14.py",
   "build-corecrypto-14.py --namespace",
   "build-arm-driver.py ArmDTPlatform",
-  "build-arm-driver.py ArmCpu",
+  "build-xun-armcpu.py",
   "build-arm-driver.py SoftwareAES",
   # NativeEmmc: Qualcomm SDHCI MSM (sdhci@4744000) for eMMC 5.1
   "build-xun-emmc.py",
