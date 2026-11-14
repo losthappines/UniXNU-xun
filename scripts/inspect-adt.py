@@ -115,7 +115,8 @@ def validate_xun_adt(root, is_smp=False):
         if not dram_base or struct.unpack('<Q', dram_base)[0] not in (0x80000000, 0x40000000):
             errors.append(f"Invalid /chosen/dram-base: {dram_base.hex() if dram_base else 'missing'}")
         darwin_mem = get_prop(chosen, 'darwinboot-memory-size')
-        if not darwin_mem or struct.unpack('<Q', darwin_mem)[0] != 0x80000000:
+        darwin_mem_val = struct.unpack('<Q', darwin_mem)[0] if darwin_mem and len(darwin_mem) == 8 else 0
+        if not darwin_mem or not (0x10000000 <= darwin_mem_val <= 0x200000000) or (darwin_mem_val % 0x200000):
             errors.append(f"Invalid /chosen/darwinboot-memory-size: {darwin_mem.hex() if darwin_mem else 'missing'}")
 
     # CPUs

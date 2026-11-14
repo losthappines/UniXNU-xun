@@ -127,8 +127,8 @@ def main():
                                    ('reg', struct.pack('<I', reg)),
                                    ('device_type', b'cpu\0'),
                                    ('compatible', b'arm,cortex-a53\0' if reg < LITTLE_CORES else b'arm,cortex-a73\0'),
-                                   # Omit cluster-type: UniXNU's native-smp-secondary.patch sets MAX_CPU_CLUSTERS=1,
-                                   # so 'P' (phys_cluster_id=2) or two clusters panics _ml_parse_cpu_topology.
+                                   # E/P cluster types require native-smp-type-clusters.patch (MAX_CPU_CLUSTERS=2, __ARM_AMP__=1).
+                                   ('cluster-type', b'E\0' if reg < LITTLE_CORES else b'P\0'),
                                    ('timebase-frequency', struct.pack('<I', TIMEBASE))])
             for index, reg in enumerate(cpu_regs)]
     tree = node('device-tree', [

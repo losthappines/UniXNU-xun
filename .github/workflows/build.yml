@@ -127,8 +127,8 @@ jobs:
       - name: Generate Apple Device Trees (.adt)
         run: |
           mkdir -p UniXNU-xun/out/xun
-          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-single.adt --cpu-regs 0
-          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-smp.adt --cpu-regs 0,1,2,3,0x100,0x101,0x102,0x103
+          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --owned-memory-size 0xBC000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-single.adt --cpu-regs 0
+          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --owned-memory-size 0xBC000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-smp.adt --cpu-regs 0,1,2,3,0x100,0x101,0x102,0x103
           python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-single.adt
           python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-smp.adt --smp
 
@@ -149,6 +149,7 @@ jobs:
           p.write_text(text.replace(old, new, 1))
           PY
           python3 unixnu ipsw fetch KernelCache OS -D ../UniXNU-xun
+          cp ../UniXNU-xun/package/xnu-patches/native-smp-type-clusters.patch patches/xnu/
           python3 unixnu defconfig xun_defconfig -D ../UniXNU-xun
           python3 ../UniXNU-xun/scripts/make-xun-data-seed.py --output out/xun-data.dbr --device ../UniXNU-xun --unixnu . --config auto
           python3 unixnu build kernel -D ../UniXNU-xun

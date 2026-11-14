@@ -178,6 +178,8 @@ kernel_args = [
   "debug=0x14e",
   "kt_fixed_zones=120",
   "armcpu-diagnostics=1",
+  "smp=1",
+  "armcpu-edge=1",
   "armcpu-self-ipi=1",
   "armcpu-spi-ipi=1",
   "armcpu-spi-ipi-base=536",
@@ -219,7 +221,8 @@ tool = "scripts/make-xun-adt.py"
 chip_id = "207"
 # 4 GiB, the iPad7,1's memory size (sheng, the board that runs iPadOS, owns 0x130000000). The firmware maps the free 0x80000000..0x1c0000000 run as one region. The first
 # boots used 2 GiB: iPadOS reached SpringBoard with 97 processes, but free memory fell to about 5 MiB.
-owned_memory_size = "0x80000000"
+# Bump from 2 GiB (which left ~4 MiB free at 130 procs) to ~2.94 GiB inside MemoryMapLib's verified RAM Pool 2 (0x80000000..0x140000000, leaving 64 MiB headroom for 2 MiB alignment and EDK2 allocations).
+owned_memory_size = "0xBC000000"
 root_match_volume_uuid = "04769D26-2CA0-4825-B443-E2E5F88300F2"   # the OS volume of the same IPSW
 # All eight cores (boot CPU 0 first): 0..3 Cortex-A53 (Kryo Silver), 0x100..0x103 Cortex-A73. ArmCpu starts the
 # others with PSCI CPU_ON under sheng-smp=1; "0" keeps the boot CPU only.
