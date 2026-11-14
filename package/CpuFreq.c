@@ -67,3 +67,10 @@ int boot_cpufreq_report(char *text, unsigned cap) {
   append(text, cap, at, want == 1 ? "tb128fu-cpufreq=1" : "read only");
   return 0;
 }
+
+extern char native_cpufreq_row[120];
+extern volatile uint32_t native_cpufreq_stage;
+void sheng_cpufreq_poll(void) {
+  if (!boot_cpufreq_report(native_cpufreq_row, sizeof(native_cpufreq_row)))
+    native_cpufreq_stage = 1;
+}

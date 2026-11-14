@@ -11,7 +11,7 @@ description = "Xiaomi Redmi Pad SE 11\" (xun)"
 kit = "xun"
 
 [components]
-include = ["ArmDTPlatform", "ArmCpu", "SoftwareAES", "XnuPrelink", "DarwinBoot"]                    # a package/ of this repository would appear as kits/tb128fu in the build tree
+include = ["ArmDTPlatform", "ArmCpu", "GopFramebuffer", "SoftwareAES", "AppleKeyStoreState", "XnuPrelink", "DarwinBoot"]
 
 # The same target OS image as UniXNU-sheng: the unchanged iPad7,1 iPadOS 17.7.11 restore image.
 [ipsw]
@@ -64,6 +64,7 @@ archives = [
   "build-link-stubs.py",
   "build-boot-progress.py",
   "build-platform-power.py",
+  "build-gop-legacy-display.py",
 ]
 
 # The same original kernelcache and prelink selection as UniXNU-sheng: the target image is the same.
@@ -189,9 +190,26 @@ kernel_args = [
   "sheng-data-persist=2",
   "boot-progress=2",
   "boot-payload-release=1",
-  "kern.maxvnodes=1200",
+  "-no_corpses",
+  "tb128fu-cpufreq=1",
+  "sheng-vsync=60",
+  "sheng-vsync-fixed=1",
+  "offline-mobile-graphics-load=1",
+  "offline-legacy-register=1",
+  "offline-legacy-phase=4",
+  "offline-legacy-gop=1",
+  "offline-legacy-unit-scale=1",
+  "offline-legacy-pm=1",
+  "offline-legacy-validate=1",
+  "offline-legacy-transfer=1",
+  "offline-legacy-cpu-present=1",
+  "offline-key-events=1",
+  "sheng-aks=1",
+  "offline-hid-input=1",
+  "offline-hid-home=1",
+  "sheng-touch-hid=1",
   "sheng-disable-watchdogd=1",
-  "sheng-disable-jobs=1",
+  "sheng-disable-jobs=com.apple.identityservicesd,com.apple.locationd,com.apple.CommCenter,com.apple.bluetoothd,com.apple.PerfPowerServices,com.apple.iomfb_fdr_loader,com.apple.iconservicesagent",
 ]
 
 [payload.adt]

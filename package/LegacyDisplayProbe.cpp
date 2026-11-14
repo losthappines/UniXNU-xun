@@ -24,7 +24,7 @@ static IOService *pendingLegacyDisplay;
 static IOService *activeGOPPresenter,*activeGOPNub;
 // GPU hand-off presenter (sheng-fb-gpu=1, phase 4): lives beside the display driver, which offers it frames instead of copying them.
 static IOService *gpuHandoffPresenter;
-extern "C" bool native_gop_gpu_offer(IOService *,void *display,IOMemoryDescriptor *,uint64_t stride,uint32_t width,uint32_t height);
+extern "C" bool native_gop_gpu_offer(IOService *,void *display,IOMemoryDescriptor *,uint64_t stride,uint32_t width,uint32_t height,uint32_t format);
 extern "C" void native_gop_presenter_set_source(IOService *presenter,IOService *nub);
 volatile uint32_t native_legacy_gpu_fallbacks,native_legacy_gpu_last_status;
 static IOService *activeLegacyDisplay;
@@ -253,8 +253,8 @@ __attribute__((noinline)) void native_legacy_transfer_observed(IOReturn status,c
         boot_progress_stage(message);
     }
 }
-bool native_legacy_gpu_offer(void *display,IOMemoryDescriptor *memory,uint64_t stride,uint32_t width,uint32_t height) {
-    return gpuHandoffPresenter && native_gop_gpu_offer(gpuHandoffPresenter,display,memory,stride,width,height);
+bool native_legacy_gpu_offer(void *display,IOMemoryDescriptor *memory,uint64_t stride,uint32_t width,uint32_t height,uint32_t format) {
+    return gpuHandoffPresenter && native_gop_gpu_offer(gpuHandoffPresenter,display,memory,stride,width,height,format);
 }
 void native_legacy_gpu_fallback_observed(int status) {
     native_legacy_gpu_last_status=(uint32_t)status;native_legacy_gpu_fallbacks=native_legacy_gpu_fallbacks+1;
@@ -491,9 +491,6 @@ extern void tb128fu_usb_probe(void);
 void native_legacy_display_late_probe(void) {
     native_keystore_probe();
     native_hid_input_probe();
-    native_touch_probe();
-    tb128fu_gpu_probe();
-    tb128fu_usb_probe();
     IOService *display=pendingLegacyDisplay;if(!display)return;pendingLegacyDisplay=nullptr;
     native_legacy_surface_status=OSKextLoadKextWithIdentifier("com.apple.iokit.IOSurface");
     OSDictionary *matching=IOService::nameMatching("IOCoreSurfaceRoot");

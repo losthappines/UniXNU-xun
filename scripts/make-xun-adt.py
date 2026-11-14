@@ -132,7 +132,7 @@ def main():
                                    ('timebase-frequency', struct.pack('<I', TIMEBASE))])
             for index, reg in enumerate(cpu_regs)]
     tree = node('device-tree', [
-        ('model', b'iPad7,3\0' if args.ipad_identity else b'xun-first-boot\0'),
+        ('model', b'iPad7,1\0' if args.ipad_identity else b'xun-first-boot\0'),
         *([('target-type', b'J120\0')] if args.ipad_identity else []),
         ('compatible', b'xiaomi,xun\0qcom,khaje\0'),
         ('#address-cells', struct.pack('<I', 2)),
@@ -169,14 +169,14 @@ def main():
         *([node('buttons', [('compatible', b'buttons\0'), ('device_type', b'buttons\0'),
                             ('button-names', b'hold\0voldown\0volup\0'),
                             ('home-button-type', struct.pack('<I', 2))])] if args.ipad_identity else []),
-        node('product', [('product-name', b'iPad Pro 11-inch (Redmi Pad SE xun)\0' if args.ipad_identity else b'Xiaomi Redmi Pad SE (xun)\0'),
+        node('product', [('product-name', b'iPad Pro (12.9-inch) (2nd generation)\0' if args.ipad_identity else b'Xiaomi Redmi Pad SE (xun)\0'),
                          ('model', b'xiaomi,xun\0'),
-                         *([('product-description', b'iPad Pro 11-inch (Redmi Pad SE xun)\0'),
+                         *([('product-description', b'iPad Pro (12.9-inch) (2nd generation)\0'),
                             ('artwork-device-idiom', b'pad\0'),
                             ('artwork-device-subtype', struct.pack('<I', 2732)),
                             ('artwork-scale-factor', struct.pack('<I', 2)),
                             ('artwork-display-gamut', b'P3\0'),
-                            ('compatible-device-fallback', b'iPad7,3\0'),
+                            ('compatible-device-fallback', b'iPad6,7\0'),
                             ('thin-bezel', struct.pack('<I', 1))] if args.ipad_identity else [])]),
         node('arm-io', [('device_type', b'arm-io\0'),
                         ('#address-cells', struct.pack('<I', 2)),

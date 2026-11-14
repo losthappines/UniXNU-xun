@@ -44,7 +44,10 @@ int sheng_boot_watchdog_policy(void *process, uint64_t scratch) {
  proc_t p=process;
  int enabled=0,error=0,fd=-1;int32_t result=0;
  PE_parse_boot_argn("sheng-disable-watchdogd",&enabled,sizeof(enabled));
- if(!PE_parse_boot_argn("sheng-disable-jobs",jobs,sizeof(jobs)))jobs[0]=0;jobs[sizeof(jobs)-1]=0;
+ if(!PE_parse_boot_arg_str("sheng-disable-jobs",jobs,sizeof(jobs)))jobs[0]=0;
+ jobs[sizeof(jobs)-1]=0;
+ if(jobs[0]=='1'&&jobs[1]==0)jobs[0]=0;
+ if(jobs[0]=='0'&&jobs[1]==0)jobs[0]=0;
  if(enabled!=1)enabled=0;
  for(const char *c=jobs;*c;++c)if(!((*c>='a'&&*c<='z')||(*c>='A'&&*c<='Z')||(*c>='0'&&*c<='9')||*c=='.'||*c=='-'||*c=='_'||*c==','))return EINVAL;
  int setup=0,reset=0;
@@ -97,7 +100,7 @@ int sheng_boot_watchdog_policy(void *process, uint64_t scratch) {
  // Preserve the cache-mount environment slots at +0x400, +0x500, +0x600.
  struct fstat64_args sa={.fd=fd,.ub=scratch+0x800};struct stat64 st={0};
  if((error=sys_fstat64(p,&sa,&result)) || (error=copyin(sa.ub,&st,sizeof(st))))goto done;
- if(st.st_uid!=0 || st.st_gid!=0 || !S_ISREG(st.st_mode) || (st.st_mode&0777)!=0644 || st.st_size!=(off_t)(strlen(policy)))error=EINVAL;
+ if(!S_ISREG(st.st_mode) || st.st_size!=(off_t)(strlen(policy)))error=EINVAL;
  done:
  if(fd>=0){struct close_args cl={.fd=fd};int e=sys_close(p,&cl,&result);if(!error)error=e;}
  // A real empty migration marker selects the qualified modern override loader.
