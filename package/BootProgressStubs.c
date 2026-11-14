@@ -6,6 +6,7 @@
  * Every definition is weak: a real provider linked next to it (the display archive's NativeLegacyDisplay,
  * LegacyDisplayProbe, NativeHidInput and TouchState define many of these) takes precedence.
  */
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 #pragma clang attribute push (__attribute__((weak)), apply_to = any(function, variable))
@@ -179,4 +180,17 @@ char tb128fu_usb_rows[5][120];
 void tb128fu_usb_log_put(const void *d, size_t l) { (void)d;(void)l; }
 char tb128fu_gpu_dvfs[2][120];
 char tb128fu_ddr_rows[3][120];
+/* Optional GPU/trace/direct-scanout hooks referenced by GopFramebuffer's NativeLegacyDisplay (static kernel link). */
+bool native_adreno_fences(uint32_t *submitted, uint32_t *retired) { (void)submitted;(void)retired;return false; }
+bool native_adreno_fences_detail(uint32_t *submitted, uint32_t *retired, uint32_t *detail) {
+  (void)submitted;(void)retired;(void)detail;return false;
+}
+int native_gpu_trace_enabled(void) { return 0; }
+void native_gpu_trace_record(uint32_t event, uint32_t pid, const uint64_t *values, uint32_t count) {
+  (void)event;(void)pid;(void)values;(void)count;
+}
+uint32_t native_ufs_dpu_map(unsigned slot, const uint64_t *pages, unsigned count) {
+  (void)slot;(void)pages;(void)count;return 0;
+}
+volatile uint32_t native_ufs_dpu_state;
 #pragma clang attribute pop

@@ -73,6 +73,29 @@ void native_aks_call(uint32_t selector, int32_t result) {
     if (selector < 96) { aks_count[selector] = aks_count[selector] + 1; aks_rc[selector] = result; }
     aks_publish();
 }
+size_t native_aks_device_id(uint8_t *out, size_t capacity) {
+    if (!out || !capacity) return 0;
+    uint8_t id[32] = {};
+    size_t len = 0;
+    IORegistryEntry *chosen = IORegistryEntry::fromPath("/chosen", gIODTPlane);
+    if (chosen) {
+        OSData *data = OSDynamicCast(OSData, chosen->getProperty("unique-chip-id"));
+        if (data && data->getLength() > 0) {
+            len = data->getLength();
+            if (len > sizeof(id)) len = sizeof(id);
+            memcpy(id, data->getBytesNoCopy(), len);
+        }
+        OSSafeReleaseNULL(chosen);
+    }
+    if (!len) {
+        static const uint8_t fallback[8] = {'x', 'u', 'n', '-', 'a', 'k', 's', 1};
+        len = sizeof(fallback);
+        memcpy(id, fallback, len);
+    }
+    if (len > capacity) len = capacity;
+    memcpy(out, id, len);
+    return len;
+}
 static void native_keyevents_probe(void) {
     unsigned enabled = 0, original = 0;
     if (!PE_parse_boot_argn("offline-key-events", &enabled, sizeof(enabled)) || enabled != 1 ||
