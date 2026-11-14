@@ -328,6 +328,11 @@ static bool spiDispatch (uint32_t intid)
 extern "C" {
 volatile uint64_t armcpu_spi_unhandled = 0;
 volatile uint32_t armcpu_spi_unhandled_id = 0;
+volatile uint64_t armcpu_spurious = 0, armcpu_spi_handled = 0;
+volatile uint32_t armcpu_spurious_core[8], armcpu_spurious_hppir = 0, armcpu_spurious_rpr = 0, armcpu_spurious_iar = 0;
+volatile uint32_t armcpu_spi_handled_id = 0;
+volatile int32_t armcpu_timer_ahead[8];
+volatile uint32_t armcpu_timer_short[8];
 }
 
 IOService *ArmCpu::probe (IOService *provider, SInt32 *score)
@@ -793,6 +798,16 @@ void ArmCpu::interrupt (void)
     __asm__ volatile ("mrs %0, icc_iar1_el1" : "=r" (id));
     armcpu_irq_id=static_cast<uint32_t>(id & 0xffffff);
     if ((id & 0xffffff) >= 1020) {
+      if (drained == 0) {
+        uint64_t hppir, rpr;
+        __asm__ volatile ("mrs %0, icc_hppir1_el1" : "=r" (hppir));
+        __asm__ volatile ("mrs %0, icc_rpr_el1" : "=r" (rpr));
+        armcpu_spurious = armcpu_spurious + 1;
+        armcpu_spurious_core[logicalId & 7] = armcpu_spurious_core[logicalId & 7] + 1;
+        armcpu_spurious_hppir = static_cast<uint32_t> (hppir);
+        armcpu_spurious_rpr = static_cast<uint32_t> (rpr);
+        armcpu_spurious_iar = static_cast<uint32_t> (id);
+      }
       armcpu_irq_phase=0;
       if (drained > 128) { armcpu_irq_long_drains = armcpu_irq_long_drains + 1; }
       if (drained > armcpu_irq_drain_most) { armcpu_irq_drain_most = drained; }
@@ -809,6 +824,14 @@ void ArmCpu::interrupt (void)
       armcpu_irq_phase=2;
       rtclock_intr (0);
       armcpu_irq_phase=3;
+      {
+        uint64_t cval, vct;
+        __asm__ volatile ("mrs %0, cntv_cval_el0" : "=r" (cval));
+        __asm__ volatile ("isb; mrs %0, cntvct_el0" : "=r" (vct));
+        const int64_t ahead = static_cast<int64_t> (cval - vct);
+        armcpu_timer_ahead[logicalId & 7] = static_cast<int32_t> (ahead > 0x7fffffff ? 0x7fffffff : ahead < -0x7fffffff ? -0x7fffffff : ahead);
+        if (ahead < 1000) { armcpu_timer_short[logicalId & 7] = armcpu_timer_short[logicalId & 7] + 1; }
+      }
     } else if ((id & 0xffffff) == 0) {
       armcpu_ipi_interrupts = armcpu_ipi_interrupts + 1;
       armcpu_core_sgi[logicalId & 7] = armcpu_core_sgi[logicalId & 7] + 1;
@@ -831,6 +854,8 @@ void ArmCpu::interrupt (void)
       wokenBy (core, 2);
       armcpu_irq_phase = 7;
       if (spiDispatch (intid)) {
+        armcpu_spi_handled = armcpu_spi_handled + 1;
+        armcpu_spi_handled_id = intid;
       } else if (intid >= 32 && gDist != 0) {
         armcpu_spi_unhandled = armcpu_spi_unhandled + 1;
         armcpu_spi_unhandled_id = intid;
