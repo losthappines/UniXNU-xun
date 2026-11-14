@@ -113,10 +113,19 @@ header = '''// SPDX-License-Identifier: BSD-2-Clause-Patent
 #include <IOKit/IOService.h>
 #include <libkern/libkern.h>
 struct OriginalLegacySwapRequest;
+struct OriginalLegacyStateRequest {uint32_t skipRequested,requested,skipPowered,powered;uint8_t changed;uint8_t pad[11];};
+static constexpr unsigned kLegacyCurrentSwap=5472,kLegacyVsyncClients=5592;
+static constexpr unsigned kRequestRect0=17,kRequestRect1=81,kRequestMasks=792,kRequestOptions=804,kRequestDims=816,kRequestSurfaces=2624;
+#define NATIVE_LEGACY_LEAVES(LEAF) LEAF(211) LEAF(245) LEAF(246) LEAF(306) LEAF(307) LEAF(338) LEAF(345)
 class IOMobileFramebufferLegacy : public IOService {
  OSDeclareAbstractStructors(IOMobileFramebufferLegacy)
  unsigned char originalPrivate[0x18a0-sizeof(IOService)];
 public:
+ void applyStateRequest(OriginalLegacyStateRequest *request,bool flag) {
+  typedef int (*Setter)(void *,OriginalLegacyStateRequest *,bool);
+  Setter setter=reinterpret_cast<Setter *>(*reinterpret_cast<void **>(this))[354];
+  setter(this,request,flag);
+ }
  void installBootDimensions(uint32_t width,uint32_t height) {
   *reinterpret_cast<uint32_t *>(reinterpret_cast<unsigned char *>(this)+5808)=width;
   *reinterpret_cast<uint32_t *>(reinterpret_cast<unsigned char *>(this)+5812)=height;

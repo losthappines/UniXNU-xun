@@ -192,6 +192,8 @@ kernel_args = [
   "boot-payload-release=1",
   "-no_corpses",
   "tb128fu-cpufreq=1",
+  "vsync=60",
+  "vsync-fixed=1",
   "sheng-vsync=60",
   "sheng-vsync-fixed=1",
   "offline-mobile-graphics-load=1",
