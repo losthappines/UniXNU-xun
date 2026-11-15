@@ -359,6 +359,48 @@ touch_obj = OUT / 'TouchState.o'
 run([str(touch_source) if str(arg) == str(source) else str(touch_obj) if str(arg) == str(OUT / 'LegacyDisplayProbe.o') else arg for arg in cmd],
     cwd=r['directory'])
 
+touch_inc = ['-I', str(kit_file('TouchBoard.h').parent)]
+touch_probe_source = kit_file('TouchProbe.cpp')
+touch_probe_obj = OUT / 'TouchProbe.o'
+run([str(touch_probe_source) if str(arg) == str(source) else str(touch_probe_obj) if str(arg) == str(OUT / 'LegacyDisplayProbe.o') else arg for arg in cmd] + touch_inc,
+    cwd=r['directory'])
+
+buttons_source = kit_file('ButtonProbe.cpp')
+buttons_obj = OUT / 'ButtonProbe.o'
+run([str(buttons_source) if str(arg) == str(source) else str(buttons_obj) if str(arg) == str(OUT / 'LegacyDisplayProbe.o') else arg for arg in cmd] + touch_inc,
+    cwd=r['directory'])
+
+print(run(['python3', ROOT / 'scripts/gen-xun-touch-firmware.py'], text=True), end='')
+c_recipe = json.loads((ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/bsd/DEVELOPMENT/kern_exec.o.json').read_text().strip().rstrip(','))
+c_cmd = []
+c_args = c_recipe['arguments']
+j = 0
+while j < len(c_args):
+    value = c_args[j]
+    if value == c_recipe['file']:
+        c_cmd.append('__C_SRC__')
+    elif value == '-o':
+        c_cmd += ['-o', '__C_OBJ__']
+        j += 1
+    elif value == '-Xclang' and c_args[j + 1].startswith('-W'):
+        j += 1
+    elif not value.startswith('-W'):
+        c_cmd.append(value)
+    j += 1
+c_cmd += ['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter'] + touch_inc
+touch_c_sources = [
+    kit_file('GeniSpi.c'),
+    kit_file('Fts8203.c'),
+    kit_file('NvtProtocol.c'),
+    ROOT / 'build/native-touch/XunTouchFirmware.c',
+]
+touch_c_objs = []
+for c_src in touch_c_sources:
+    c_obj = OUT / f'{c_src.stem}.o'
+    touch_c_objs.append(c_obj)
+    run([str(c_src) if arg == '__C_SRC__' else str(c_obj) if arg == '__C_OBJ__' else arg for arg in c_cmd],
+        cwd=c_recipe['directory'])
+
 archive.unlink(missing_ok=True)
 print(run(['python3', ROOT / 'scripts/build-sheng-hid-input.py'], text=True), end='')
 hid_dir = ROOT / 'build/sheng-hid-input'
@@ -376,7 +418,7 @@ require(code((keyevents / 'NativeKeyStoreEvents.o').read_bytes(), macho((keyeven
 run(['xcrun', 'ar', 'rcs', archive,
      late, OUT / 'original-bindings.o', OUT / 'LegacyDisplayProbe.o',
      keystore_obj, keyevents_late,
-     hid_obj, touch_obj,
+     hid_obj, touch_obj, touch_probe_obj, buttons_obj, *touch_c_objs,
      hid_dir / 'NativeHidInput.late.o', hid_dir / 'hid-original-bindings.o'])
 
 print(run(['python3', ROOT / 'scripts/build-arm-driver.py', 'NativeGOPPresenter'], text=True), end='')
@@ -398,6 +440,17 @@ sources = [
     ROOT / 'drivers/AppleKeyStoreState/NativeKeyStoreEvents.cpp',
     hid_source,
     touch_source,
+    touch_probe_source,
+    buttons_source,
+    kit_file('TouchBoard.h'),
+    kit_file('BootResetCore.h'),
+    kit_file('GeniSpi.c'),
+    kit_file('GeniSpi.h'),
+    kit_file('Fts8203.c'),
+    kit_file('Fts8203.h'),
+    kit_file('NvtProtocol.c'),
+    kit_file('NvtProtocol.h'),
+    ROOT / 'scripts/gen-xun-touch-firmware.py',
     ROOT / 'drivers/ShengHidInput/NativeHidInput.cpp',
     ROOT / 'scripts/build-sheng-hid-input.py',
     ROOT / 'drivers/GopFramebuffer/NativeGOPPresenter.cpp',

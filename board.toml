@@ -212,6 +212,9 @@ kernel_args = [
   "offline-hid-input=1",
   "offline-hid-home=1",
   "sheng-touch-hid=1",
+  "sheng-touch-split=1",
+  "buttons=1",
+  "xun-touch=5",
   "sheng-disable-watchdogd=1",
   "sheng-disable-jobs=com.apple.identityservicesd,com.apple.locationd,com.apple.CommCenter,com.apple.bluetoothd,com.apple.PerfPowerServices,com.apple.iomfb_fdr_loader,com.apple.iconservicesagent",
 ]

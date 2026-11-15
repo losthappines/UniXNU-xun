@@ -483,6 +483,7 @@ void native_legacy_display_late_probe(void);
 extern void native_hid_input_probe(void);
 extern void native_keystore_probe(void);
 extern void native_touch_probe(void);
+extern void xun_buttons_probe(void);
 extern void tb128fu_gpu_probe(void);
 extern void tb128fu_usb_probe(void);
 // TB128FU: sheng's CPU frequency and GPU power probes drive sheng hardware and are not in this board's archive; the touch and
@@ -491,6 +492,8 @@ extern void tb128fu_usb_probe(void);
 void native_legacy_display_late_probe(void) {
     native_keystore_probe();
     native_hid_input_probe();
+    xun_buttons_probe();
+    native_touch_probe();
     IOService *display=pendingLegacyDisplay;if(!display)return;pendingLegacyDisplay=nullptr;
     native_legacy_surface_status=OSKextLoadKextWithIdentifier("com.apple.iokit.IOSurface");
     OSDictionary *matching=IOService::nameMatching("IOCoreSurfaceRoot");

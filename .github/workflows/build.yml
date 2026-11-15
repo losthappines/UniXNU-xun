@@ -131,6 +131,15 @@ jobs:
           python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-single.adt
           python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-smp.adt --smp
 
+      - name: Fetch & Verify Xun Touch Firmware Blobs
+        run: |
+          mkdir -p UniXNU-xun/.cache/firmware/xun
+          BASE="https://github.com/robsonsilv4/android_vendor_xiaomi_xun/raw/lineage-22.2/proprietary/vendor/firmware"
+          curl -fsSL "$BASE/focaltech_ts_fw_boe_ft8203.bin" -o UniXNU-xun/.cache/firmware/xun/focaltech_ts_fw_boe_ft8203.bin
+          curl -fsSL "$BASE/focaltech_ts_fw_huaxing_ft8203.bin" -o UniXNU-xun/.cache/firmware/xun/focaltech_ts_fw_huaxing_ft8203.bin
+          curl -fsSL "$BASE/novatek_ts_fw_tianma.bin" -o UniXNU-xun/.cache/firmware/xun/novatek_ts_fw_tianma.bin
+          python3 UniXNU-xun/scripts/gen-xun-touch-firmware.py --require-blobs
+
       - name: Configure & Build XNU Kernel (MACHINE_CONFIGS=BCM2837)
         working-directory: UniXNU
         env:
