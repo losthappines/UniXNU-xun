@@ -10,6 +10,7 @@
 #include <IOKit/IOService.h>
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
+#include <IOKit/IOBufferMemoryDescriptor.h>
 #include <string.h>
 #include <libkern/c++/OSSharedPtr.h>
 #include <kern/thread.h>
@@ -51,10 +52,33 @@ constexpr uint32_t kFtsRawWidth = 1536, kFtsRawHeight = 2400;
 constexpr uint32_t kIntrCfg = 0x8, kIntrStatus = 0xc;
 constexpr uint32_t kIntrFallingLatch = (1u << 4) | (2u << 2) | (1u << 1);
 constexpr uint32_t kProbeHz = 1000000u;
+constexpr size_t kDmaBufBytes = 65536u;
+constexpr unsigned kForceDmaUnset = 0xffffffffu;
 
 enum class ChipKind { None = 0, Fts8203 = 1, Nvt36532 = 2 };
 
 struct Region {OSSharedPtr<IOMemoryMap> keep; uintptr_t va = 0;};
+
+size_t dcacheLineBytes() {
+    uint64_t ctr = 0;
+    __asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr));
+    return static_cast<size_t>(4u << ((ctr >> 16) & 15u));
+}
+
+void flushDcache(void *virt, size_t len, bool inval) {
+    if (!virt || !len) return;
+    const size_t line = dcacheLineBytes();
+    const uintptr_t start = reinterpret_cast<uintptr_t>(virt) & ~(line - 1u);
+    const uintptr_t end = reinterpret_cast<uintptr_t>(virt) + len;
+    for (uintptr_t a = start; a < end; a += line) {
+        if (inval) __asm__ volatile("dc civac, %0" :: "r"(a) : "memory");
+        else __asm__ volatile("dc cvac, %0" :: "r"(a) : "memory");
+    }
+    __asm__ volatile("dsb sy" ::: "memory");
+}
+
+void dmaClean(void *, void *virt, size_t len) {flushDcache(virt, len, false);}
+void dmaCleanInval(void *, void *virt, size_t len) {flushDcache(virt, len, true);}
 
 bool mapRegion(uint64_t phys, uint64_t length, Region &region) {
     IODeviceMemory *memory = IODeviceMemory::withRange(phys, length);
@@ -82,13 +106,20 @@ void ioDelayUs(void *, unsigned us) {
 }
 
 struct Session {
-    Region gccLow, gccQup, gccVote, tlmmSpi, tlmmIrq, tlmmRst, wrapper, se;
+    Region gccLow, gccQup, gccVote, tlmmSpi, tlmmIrq, tlmmRst, wrapper, se, smmu;
     uint32_t vals[24] = {};
     uint64_t levelHz[TB_DFS_LEVELS] = {};
     unsigned levels = 0, level = 0, div = 0;
     int dfs = 0;
     uint64_t actualHz = 0;
     struct geni_spi spi = {};
+    IOBufferMemoryDescriptor *dmaTxDesc = nullptr, *dmaRxDesc = nullptr;
+    uint8_t *dmaTxCpu = nullptr, *dmaRxCpu = nullptr;
+    uint64_t dmaTxPhys = 0, dmaRxPhys = 0;
+    uint32_t smmuS2cr = 0;
+    int32_t smmuSlot = -1;
+    bool smmuBypassed = false;
+    unsigned forceDma = kForceDmaUnset;
     int loopRc = 99;
     uint8_t loopRx[8] = {};
     unsigned traceN = 0, ringN = 0;
@@ -107,6 +138,7 @@ struct Session {
     struct Fts8203Frame ftsFrame = {};
     struct nvt_bus nvtBus = {};
     struct nvt_chip nvt = {};
+    uint8_t *nvtScratch = nullptr, *nvtRxBuf = nullptr;
     struct nvt_fw nvtFw = {};
     struct nvt_fw_info nvtInfo = {};
     struct nvt_point_frame nvtPoints = {};
@@ -169,14 +201,31 @@ void traceRows(const Session &s) {
 void rows(const Session &s) {
     traceRows(s);
     const uint32_t *v = s.vals;
-    snprintf(native_touch_rows[0], sizeof native_touch_rows[0],
-             "TCH s%u/%u st%u e%d vote%08x h%08x %08x %08x %08x %08x gp%08x",
-             native_touch_stage_done, native_touch_stage_req, native_touch_step, native_touch_error,
-             v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
+    if (native_touch_stage_done == 5 && !native_touch_error) {
+        snprintf(native_touch_rows[0], sizeof native_touch_rows[0],
+                 "TCH s5/5 %s fw%u %uHz dm%u fr%u ok%u c%u (%d,%d) ed%u lo%u rd%u bad%u",
+                 s.chipName, static_cast<unsigned>(s.activeFwSize), static_cast<unsigned>(s.actualHz),
+                 static_cast<unsigned>(s.spi.use_dma), native_touch_frames, native_touch_valid,
+                 native_touch_contacts, native_touch_last_x, native_touch_last_y,
+                 s.edges, s.lowSeen, s.reads, s.bad);
+    } else if (native_touch_error && native_touch_stage_done >= 2) {
+        snprintf(native_touch_rows[0], sizeof native_touch_rows[0],
+                 "TCH s%u/%u st%u e%d %s if%x dm%u fw%x hz%u L%u/%u irq%x st%x tx%x rx%x sm%x",
+                 native_touch_stage_done, native_touch_stage_req, native_touch_step, native_touch_error,
+                 s.chipName, v[20], static_cast<unsigned>(s.spi.use_dma), v[19],
+                 static_cast<unsigned>(s.actualHz), s.level, s.div,
+                 s.spi.snap_irq, s.spi.snap_status, s.spi.snap_dma_txin, s.spi.snap_dma_rxin, s.smmuS2cr);
+    } else {
+        snprintf(native_touch_rows[0], sizeof native_touch_rows[0],
+                 "TCH s%u/%u st%u e%d vote%08x h%08x %08x %08x %08x %08x gp%08x",
+                 native_touch_stage_done, native_touch_stage_req, native_touch_step, native_touch_error,
+                 v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
+    }
     snprintf(native_touch_rows[1], sizeof native_touch_rows[1],
-             "TCH spi=%s %uHz L%u/%u fw%u if%08x hw%08x loop%d(%02x%02x)",
+             "TCH spi=%s %uHz L%u/%u fw%u if%08x hw%08x loop%d(%02x%02x) dm%u sm%d:%x",
              s.chipName, static_cast<unsigned>(s.actualHz), s.level, s.div,
-             static_cast<unsigned>(s.activeFwSize), v[20], v[21], s.loopRc, s.loopRx[0], s.loopRx[1]);
+             static_cast<unsigned>(s.activeFwSize), v[20], v[21], s.loopRc, s.loopRx[0], s.loopRx[1],
+             static_cast<unsigned>(s.spi.use_dma), s.smmuSlot, s.smmuS2cr);
     snprintf(native_touch_rows[2], sizeof native_touch_rows[2],
              "TCH gp %08x %08x %08x %08x irq%08x rst%08x rcg%08x/%08x",
              v[10], v[11], v[12], v[13], v[14], v[17], v[8], v[9]);
@@ -287,6 +336,80 @@ bool snapshot(Session &s) {
     return true;
 }
 
+bool configureSmmuBypass(Session &s) {
+    if (!mapRegion(TB_APPS_SMMU_BASE, 0x2000u, s.smmu)) return false;
+    const uintptr_t base = s.smmu.va;
+    if (rd32(base, 0x0u) & 1u) {
+        s.smmuBypassed = true;
+        return true;
+    }
+    uint32_t numSmrg = rd32(base, 0x20u) & 0xffu;
+    if (numSmrg > 128u) numSmrg = 128u;
+    int32_t matched = -1, freeSlot = -1;
+    for (uint32_t i = 0; i < numSmrg; ++i) {
+        const uint32_t smr = rd32(base, 0x800u + i * 4u);
+        if (smr & (1u << 31)) {
+            const uint32_t id = smr & 0x7fffu;
+            const uint32_t mask = (smr >> 16) & 0x7fffu;
+            if ((TB_QUP_SMMU_SID & ~mask) == (id & ~mask)) {
+                matched = static_cast<int32_t>(i);
+                break;
+            }
+        } else if (freeSlot < 0) {
+            freeSlot = static_cast<int32_t>(i);
+        }
+    }
+    const int32_t slot = (matched >= 0) ? matched : freeSlot;
+    if (slot < 0) return false;
+    if (matched < 0) {
+        wr32(base, 0x800u + static_cast<uint32_t>(slot) * 4u, (1u << 31) | TB_QUP_SMMU_SID);
+    }
+    wr32(base, 0xC00u + static_cast<uint32_t>(slot) * 4u, 1u << 16);  // TYPE = Bypass
+    wr32(base, 0x70u, 0u);
+    wr32(base, 0x74u, 0u);
+    for (unsigned wait = 0; wait < 10000u; ++wait) {
+        if ((rd32(base, 0x78u) & 1u) == 0u) break;
+    }
+    s.smmuSlot = slot;
+    s.smmuS2cr = rd32(base, 0xC00u + static_cast<uint32_t>(slot) * 4u);
+    s.smmuBypassed = true;
+    return true;
+}
+
+bool allocateDmaBuf(IOBufferMemoryDescriptor **descOut, uint8_t **cpuOut, uint64_t *physOut) {
+    const IOOptionBits opts = static_cast<IOOptionBits>(kIODirectionInOut) |
+                              static_cast<IOOptionBits>(kIOMemoryPhysicallyContiguous);
+    IOBufferMemoryDescriptor *desc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(
+        kernel_task, opts, kDmaBufBytes, 0xFFFFF000ULL);
+    if (!desc || desc->prepare() != kIOReturnSuccess) {
+        if (desc) desc->release();
+        return false;
+    }
+    IOByteCount segLen = 0;
+    const uint64_t phys = desc->getPhysicalSegment(0, &segLen);
+    uint8_t *cpu = static_cast<uint8_t *>(desc->getBytesNoCopy());
+    if (!cpu || !phys || (phys >> 32) || segLen < kDmaBufBytes) {
+        desc->complete();
+        desc->release();
+        return false;
+    }
+    bzero(cpu, kDmaBufBytes);
+    *descOut = desc;
+    *cpuOut = cpu;
+    *physOut = phys;
+    return true;
+}
+
+bool allocateDmaBuffers(Session &s) {
+    if (!allocateDmaBuf(&s.dmaTxDesc, &s.dmaTxCpu, &s.dmaTxPhys)) return false;
+    if (!allocateDmaBuf(&s.dmaRxDesc, &s.dmaRxCpu, &s.dmaRxPhys)) return false;
+    s.spi.dma = (struct geni_dma){
+        nullptr, dmaClean, dmaCleanInval, dmaCleanInval,
+        s.dmaTxCpu, s.dmaRxCpu, s.dmaTxPhys, s.dmaRxPhys, kDmaBufBytes
+    };
+    return true;
+}
+
 bool enableBus(Session &s) {
     mark(s, 2);
     wr32(s.gccVote.va, TB_GCC_GPLL0_ENABLE & 0xfff, rd32(s.gccVote.va, TB_GCC_GPLL0_ENABLE & 0xfff) | 1u);
@@ -312,7 +435,7 @@ bool enableBus(Session &s) {
     s.vals[5] = rd32(s.gccQup.va, TB_HALT_S0 & 0xfff);
     if (!ok) {fail(2, -110); return false;}
 
-    const uint32_t spiPin = tb_pin_cfg(TB_FUNC_QUP0, TB_DRIVE_6MA, TB_PULL_NONE);
+    const uint32_t spiPin = tb_pin_cfg(TB_FUNC_QUP0, TB_DRIVE_6MA, TB_PULL_UP);
     for (unsigned i = 0; i < 4; ++i) {
         if (TB_GPIO_SPI_FIRST + i == TB_GPIO_SPI_CS) {
             wr32(s.tlmmSpi.va, i * TB_GPIO_STRIDE + 4, TB_GPIO_OUT);
@@ -337,32 +460,73 @@ bool enableBus(Session &s) {
     }
     s.spi.se = (struct geni_io){reinterpret_cast<void *>(s.se.va), ioRd, ioWr, ioDelayUs};
     s.spi.wrapper = (struct geni_io){reinterpret_cast<void *>(s.wrapper.va), ioRd, ioWr, ioDelayUs};
-    s.spi.use_dma = 0;
-    s.spi.allow_fifo_disabled = 1;
     s.spi.poll_only = 1;
     if (geni_spi_read_info(&s.spi)) {fail(3, -5); return false;}
     s.vals[19] = s.spi.info.fw_revision;
     s.vals[20] = s.spi.info.if_disable;
     s.vals[21] = s.spi.info.qup_hw_version;
+
+    const bool wantDma = (s.forceDma == 1u) || (s.forceDma == kForceDmaUnset && s.spi.info.fifo_disabled != 0);
+    if (wantDma) {
+        if (!configureSmmuBypass(s)) {fail(3, -5); return false;}
+        if (!allocateDmaBuffers(s)) {fail(3, -12); return false;}
+        s.spi.use_dma = 1;
+        s.spi.allow_fifo_disabled = 0;
+    } else {
+        s.spi.use_dma = 0;
+        s.spi.allow_fifo_disabled = (s.forceDma == 0u && s.spi.info.fifo_disabled) ? 1 : 0;
+    }
     return true;
+}
+
+bool ftsProbeRom(Session &s) {
+    for (unsigned attempt = 0; attempt < 2; ++attempt) {
+        gpioReset(&s, 0);
+        IOSleep(2);
+        gpioReset(&s, 1);
+        IOSleep(8);
+        const uint8_t cmd55[4] = {0x55, 0x00, 0x00, 0x00};
+        if (busXfer(&s, cmd55, nullptr, sizeof cmd55) != 0) continue;
+        IOSleep(8);
+        uint8_t rom[2] = {0, 0};
+        if (fts8203_read(&s.fts, 0x90, rom, sizeof rom) == 0 && rom[0] == 0x82 && rom[1] == 0x01) {
+            s.fts.rom[0] = rom[0];
+            s.fts.rom[1] = rom[1];
+            return true;
+        }
+    }
+    return false;
 }
 
 bool openAndIdentify(Session &s) {
     mark(s, 4);
     if (!s.dfs) {
-        s.levelHz[0] = tb_rcg_hz(rd32(s.gccQup.va, (TB_S0_RCG + TB_RCG_CFG) & 0xfff),
+        s.vals[7] = rd32(s.gccQup.va, (TB_S0_RCG + TB_RCG_CMD) & 0xfff);
+        s.vals[8] = rd32(s.gccQup.va, (TB_S0_RCG + TB_RCG_CFG) & 0xfff);
+        s.levelHz[0] = tb_rcg_hz(s.vals[8],
                                  rd32(s.gccQup.va, (TB_S0_RCG + TB_RCG_M) & 0xfff),
                                  rd32(s.gccQup.va, (TB_S0_RCG + TB_RCG_N) & 0xfff));
+        if (!s.levelHz[0]) {
+            wr32(s.gccQup.va, (TB_S0_RCG + TB_RCG_CFG) & 0xfff, 1);
+            wr32(s.gccQup.va, (TB_S0_RCG + TB_RCG_CMD) & 0xfff, s.vals[7] | 1u);
+            for (unsigned i = 0; i < 1000 && (rd32(s.gccQup.va, (TB_S0_RCG + TB_RCG_CMD) & 0xfff) & 1u); ++i) IODelay(10);
+            s.levelHz[0] = 19200000ULL;
+        }
     }
-    if (geni_spi_init(&s.spi)) {fail(4, -5); return false;}
+    if (rd32(s.se.va, SE_GENI_STATUS) & GENI_STATUS_M_ACTIVE) {
+        wr32(s.se.va, SE_GENI_M_CMD_CTRL_REG, GENI_M_CMD_ABORT);
+        for (unsigned i = 0; i < 5000 && (rd32(s.se.va, SE_GENI_STATUS) & GENI_STATUS_M_ACTIVE); ++i) ioDelayUs(nullptr, 10);
+    }
+    int r = geni_spi_init(&s.spi);
+    if (r) {fail(4, r); return false;}
     if (geni_spi_setup(&s.spi, 0, 0)) {fail(4, -22); return false;}
     if (!setSpiRate(s, kProbeHz)) {fail(4, -22); return false;}
 
     // Internal engine loopback check before touching the external panel bus.
     const uint8_t pat[4] = {0xa5, 0x5a, 0x3c, 0xc3};
-    wr32(s.se.va, SE_SPI_LOOPBACK, 1);
+    geni_spi_setup(&s.spi, GENI_SPI_LOOP, 0);
     int lrc = geni_spi_transfer(&s.spi, pat, s.loopRx, sizeof pat, 0);
-    wr32(s.se.va, SE_SPI_LOOPBACK, 0);
+    geni_spi_setup(&s.spi, 0, 0);
     s.loopRc = (lrc == 0 && memcmp(pat, s.loopRx, sizeof pat) == 0) ? 0 : (lrc ? lrc : -5);
     if (s.loopRc) {fail(5, s.loopRc); return false;}
 
@@ -372,10 +536,14 @@ bool openAndIdentify(Session &s) {
     s.fts.io.reset = gpioReset;
     s.fts.io.stage = ftsStage;
 
+    s.nvtScratch = static_cast<uint8_t *>(IOMallocZero(NVT_TRANSFER_LEN + 8u));
+    s.nvtRxBuf = static_cast<uint8_t *>(IOMallocZero(NVT_READ_MAX + 2u));
     s.nvtBus.ctx = &s;
     s.nvtBus.xfer = busXfer;
     s.nvtBus.delay_ms = busDelayMs;
     s.nvt.bus = &s.nvtBus;
+    s.nvt.scratch = s.nvtScratch;
+    s.nvt.rxbuf = s.nvtRxBuf;
 
     for (unsigned attempt = 0; attempt < 2 && s.kind == ChipKind::None; ++attempt) {
         if (attempt > 0) IOSleep(20);
@@ -391,13 +559,24 @@ bool openAndIdentify(Session &s) {
         IOSleep(10);
         gpioReset(&s, 1);
         IOSleep(10);
-        if (!nvt_identify(&s.nvt)) {
+        if (s.nvtScratch && s.nvtRxBuf && !nvt_identify(&s.nvt)) {
             s.kind = ChipKind::Nvt36532;
             s.chipName = "nt36532";
             s.rawW = XUN_PANEL_WIDTH;
             s.rawH = XUN_PANEL_HEIGHT;
             break;
         }
+        if (ftsProbeRom(s)) {
+            s.kind = ChipKind::Fts8203;
+            s.chipName = "ft8203";
+            s.rawW = kFtsRawWidth;
+            s.rawH = kFtsRawHeight;
+            break;
+        }
+    }
+    if (s.kind != ChipKind::Nvt36532) {
+        if (s.nvtScratch) {IOFree(s.nvtScratch, NVT_TRANSFER_LEN + 8u); s.nvtScratch = nullptr; s.nvt.scratch = nullptr;}
+        if (s.nvtRxBuf) {IOFree(s.nvtRxBuf, NVT_READ_MAX + 2u); s.nvtRxBuf = nullptr; s.nvt.rxbuf = nullptr;}
     }
     if (s.kind == ChipKind::None) {fail(6, -19); return false;}
     return true;
@@ -554,6 +733,13 @@ void eventLoop(Session &s) {
             }
             if (rc == FTS8203_FRAME_EMPTY) {
                 s.idleReads++;
+                if (s.lastCount > 0) {
+                    s.lastCount = 0;
+                    touch_report r{};
+                    changed = true;
+                    native_hid_touch_update(&r);
+                }
+                if (s.reads <= 4 || (s.reads & 63u) == 0u || changed) rows(s);
                 IOSleep(4);
                 continue;
             }
@@ -605,7 +791,7 @@ void eventLoop(Session &s) {
                 lastY[i] = static_cast<unsigned>(rys[i]);
             }
         }
-        if ((s.reads & 63u) == 0u || changed) rows(s);
+        if (s.reads <= 4 || (s.reads & 63u) == 0u || changed) rows(s);
         IOSleep(n > 0 ? 4 : 8);
     }
 }
@@ -616,6 +802,7 @@ void touchThread(void *, wait_result_t) {
     if (!s) {fail(1, -12); return;}
     PE_parse_boot_argn("xun-touch-fw", &s->fwMode, sizeof s->fwMode);
     PE_parse_boot_argn("xun-touch-flip", &s->flip, sizeof s->flip);
+    PE_parse_boot_argn("xun-touch-dma", &s->forceDma, sizeof s->forceDma);
 
     const unsigned stage = native_touch_stage_req;
     if (!snapshot(*s)) {rows(*s); delete s; return;}
