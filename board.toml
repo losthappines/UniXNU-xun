@@ -188,7 +188,6 @@ kernel_args = [
   "-no_slto_panic",
   "ml-timeout-lock-panic-scale=40",
   "native-emmc-root=1",
-  "native-emmc-diagnostics=2",
   "sheng-data-persist=2",
   "boot-progress=2",
   "boot-payload-release=1",
@@ -214,7 +213,7 @@ kernel_args = [
   "sheng-touch-hid=1",
   "sheng-touch-split=1",
   "buttons=1",
-  "xun-touch=5",
+  "touch=5",
   "sheng-disable-watchdogd=1",
   "sheng-disable-jobs=com.apple.identityservicesd,com.apple.locationd,com.apple.CommCenter,com.apple.bluetoothd,com.apple.PerfPowerServices,com.apple.iomfb_fdr_loader,com.apple.iconservicesagent",
 ]
