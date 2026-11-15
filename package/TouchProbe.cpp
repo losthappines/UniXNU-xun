@@ -337,41 +337,108 @@ bool snapshot(Session &s) {
 }
 
 bool configureSmmuBypass(Session &s) {
-    if (!mapRegion(TB_APPS_SMMU_BASE, 0x2000u, s.smmu)) return false;
+    if (!mapRegion(TB_APPS_SMMU_BASE, TB_APPS_SMMU_SIZE, s.smmu)) {s.smmuSlot = -10; return false;}
     const uintptr_t base = s.smmu.va;
     if (rd32(base, 0x0u) & 1u) {
         s.smmuBypassed = true;
         return true;
     }
-    uint32_t numSmrg = rd32(base, 0x20u) & 0xffu;
-    if (numSmrg > 128u) numSmrg = 128u;
+    const uint32_t idr0 = rd32(base, 0x20u);
+    const uint32_t idr1 = rd32(base, 0x24u);
+    uint32_t numSmrg = idr0 & 0xffu;
+    if (numSmrg > 50u) numSmrg = 50u;   // vendor_boot qcom,num-smr-override = 0x32
+    const uint32_t pagesize = (idr1 & (1u << 31)) ? 0x10000u : 0x1000u;
+    const uint32_t numPages = 1u << (((idr1 >> 28) & 7u) + 1u);
+    const uint32_t cbBase = numPages * pagesize;
+    uint32_t numCb = idr1 & 0xffu;
+    if (numCb > 48u) numCb = 48u;       // vendor_boot qcom,num-context-banks-override = 0x30
+    if (numSmrg == 0u || numCb == 0u || cbBase + numCb * pagesize > TB_APPS_SMMU_SIZE) {
+        s.smmuSlot = -11;
+        s.smmuS2cr = idr1;
+        return false;
+    }
+
+    uint64_t cbUsedMask = 0;
     int32_t matched = -1, freeSlot = -1;
     for (uint32_t i = 0; i < numSmrg; ++i) {
         const uint32_t smr = rd32(base, 0x800u + i * 4u);
         if (smr & (1u << 31)) {
             const uint32_t id = smr & 0x7fffu;
             const uint32_t mask = (smr >> 16) & 0x7fffu;
-            if ((TB_QUP_SMMU_SID & ~mask) == (id & ~mask)) {
-                matched = static_cast<int32_t>(i);
-                break;
+            const uint32_t s2cr = rd32(base, 0xC00u + i * 4u);
+            if (((s2cr >> 16) & 3u) == 0u) {
+                const uint32_t cb = s2cr & 0xffu;
+                if (cb < numCb) cbUsedMask |= (1ULL << cb);
+            }
+            if (id == TB_QUP_SMMU_SID && mask == 0u) {
+                if (matched < 0) matched = static_cast<int32_t>(i);
+            } else if ((TB_QUP_SMMU_SID & ~mask) == (id & ~mask)) {
+                const uint32_t type = (s2cr >> 16) & 3u;
+                const uint32_t cb = s2cr & 0xffu;
+                const bool cbBypass = (type == 0u && cb < numCb && (rd32(base, cbBase + cb * pagesize) & 1u) == 0u);
+                s.smmuSlot = static_cast<int32_t>(i);
+                s.smmuS2cr = s2cr;
+                if (type == 1u || cbBypass) {
+                    s.smmuBypassed = true;
+                    return true;
+                }
+                return false;
             }
         } else if (freeSlot < 0) {
             freeSlot = static_cast<int32_t>(i);
         }
     }
     const int32_t slot = (matched >= 0) ? matched : freeSlot;
-    if (slot < 0) return false;
-    if (matched < 0) {
-        wr32(base, 0x800u + static_cast<uint32_t>(slot) * 4u, (1u << 31) | TB_QUP_SMMU_SID);
-    }
-    wr32(base, 0xC00u + static_cast<uint32_t>(slot) * 4u, 1u << 16);  // TYPE = Bypass
-    wr32(base, 0x70u, 0u);
-    wr32(base, 0x74u, 0u);
-    for (unsigned wait = 0; wait < 10000u; ++wait) {
-        if ((rd32(base, 0x78u) & 1u) == 0u) break;
-    }
+    if (slot < 0) {s.smmuSlot = -12; return false;}
     s.smmuSlot = slot;
-    s.smmuS2cr = rd32(base, 0xC00u + static_cast<uint32_t>(slot) * 4u);
+    if (matched >= 0) {
+        const uint32_t curS2cr = rd32(base, 0xC00u + static_cast<uint32_t>(slot) * 4u);
+        const uint32_t type = (curS2cr >> 16) & 3u;
+        const uint32_t cb = curS2cr & 0xffu;
+        const bool cbBypass = (type == 0u && cb < numCb && (rd32(base, cbBase + cb * pagesize) & 1u) == 0u);
+        if (type == 1u || cbBypass) {
+            s.smmuS2cr = curS2cr;
+            s.smmuBypassed = true;
+            return true;
+        }
+    }
+
+    int32_t bank = -1;
+    for (uint32_t b = 0; b < numCb; ++b) {
+        if (cbUsedMask & (1ULL << b)) continue;
+        if ((rd32(base, cbBase + b * pagesize) & 1u) != 0u) continue;
+        bank = static_cast<int32_t>(b);
+        break;
+    }
+    if (bank < 0) {s.smmuSlot = -13; return false;}
+
+    const uint32_t cbOff = cbBase + static_cast<uint32_t>(bank) * pagesize;
+    const uint32_t cbarOff = pagesize + static_cast<uint32_t>(bank) * 4u;
+    const uint32_t cba2rOff = pagesize + 0x800u + static_cast<uint32_t>(bank) * 4u;
+    wr32(base, cbOff + 0x0u, 0u);
+    const uint32_t sctlrRb = rd32(base, cbOff + 0x0u);
+    if ((sctlrRb & 1u) != 0u) {s.smmuS2cr = 0xE1000000u | (sctlrRb & 0xffffffu); return false;}
+    wr32(base, cba2rOff, 1u);
+    const uint32_t cba2rRb = rd32(base, cba2rOff);
+    if ((cba2rRb & 1u) != 1u) {s.smmuS2cr = 0xE2000000u | (cba2rRb & 0xffffffu); return false;}
+    wr32(base, cbarOff, 0x10000u);
+    const uint32_t cbarRb = rd32(base, cbarOff);
+    if ((cbarRb & 0x30000u) != 0x10000u) {s.smmuS2cr = 0xE3000000u | (cbarRb & 0xffffffu); return false;}
+    __asm__ volatile("dsb sy" ::: "memory");
+
+    const uint32_t s2crOff = 0xC00u + static_cast<uint32_t>(slot) * 4u;
+    const uint32_t smrOff = 0x800u + static_cast<uint32_t>(slot) * 4u;
+    wr32(base, s2crOff, static_cast<uint32_t>(bank));
+    s.smmuS2cr = rd32(base, s2crOff);
+    if ((s.smmuS2cr & 0x300ffu) != static_cast<uint32_t>(bank)) return false;
+    wr32(base, smrOff, (1u << 31) | TB_QUP_SMMU_SID);
+    const uint32_t smrRb = rd32(base, smrOff);
+    if ((smrRb & 0x80007fffu) != ((1u << 31) | TB_QUP_SMMU_SID)) {
+        s.smmuS2cr = 0xE5000000u | (smrRb & 0xffffffu);
+        return false;
+    }
+    __asm__ volatile("dsb sy" ::: "memory");
+
     s.smmuBypassed = true;
     return true;
 }
@@ -470,6 +537,7 @@ bool enableBus(Session &s) {
     if (wantDma) {
         if (!configureSmmuBypass(s)) {fail(3, -5); return false;}
         if (!allocateDmaBuffers(s)) {fail(3, -12); return false;}
+        rows(s);
         s.spi.use_dma = 1;
         s.spi.allow_fifo_disabled = 0;
     } else {
