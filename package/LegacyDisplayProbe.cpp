@@ -121,6 +121,13 @@ void native_legacy_pm_observed(unsigned stage,IOReturn status,unsigned long ordi
     native_legacy_pm_stage=stage;native_legacy_pm_status=status;native_legacy_pm_ordinal=(uint32_t)ordinal;
     native_legacy_pm_calls=native_legacy_pm_calls+1;
     if(stage==3)native_legacy_pm_callbacks=native_legacy_pm_callbacks+1;
+    if(stage==4 && status==kIOReturnSuccess && ordinal==0 &&
+       native_legacy_gop_virtual && native_legacy_gop_bytes && native_legacy_transfer_calls>0) {
+        volatile uint32_t *fb=reinterpret_cast<volatile uint32_t *>(native_legacy_gop_virtual);
+        const uint64_t count=native_legacy_gop_bytes/4;
+        for(uint64_t i=0;i<count;++i)fb[i]=0xff000000U;
+        __asm__ volatile("dsb sy" ::: "memory");
+    }
 }
 __attribute__((noinline)) void native_legacy_swap_validation_checkpoint(bool,unsigned,const void *,const void *) {__asm__ volatile("" ::: "memory");}
 // Last rejected swap request, copied from the original request layout the validator reads (offsets

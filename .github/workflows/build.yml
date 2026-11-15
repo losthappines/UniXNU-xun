@@ -126,8 +126,8 @@ jobs:
       - name: Generate Apple Device Trees (.adt)
         run: |
           mkdir -p UniXNU-xun/out/xun
-          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --owned-memory-size 0xBC000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-single.adt --cpu-regs 0
-          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x180000000 --owned-memory-size 0xBC000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-smp.adt --cpu-regs 0,1,2,3,0x100,0x101,0x102,0x103
+          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x200000000 --owned-memory-size 0x1B8000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-single.adt --cpu-regs 0
+          python3 UniXNU-xun/scripts/make-xun-adt.py --dram-size 0x200000000 --owned-memory-size 0x1B8000000 --ipad-identity --root-match-volume-uuid 04769D26-2CA0-4825-B443-E2E5F88300F2 --output UniXNU-xun/out/xun/xun-smp.adt --cpu-regs 0,1,2,3,0x100,0x101,0x102,0x103
           python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-single.adt
           python3 UniXNU-xun/scripts/inspect-adt.py UniXNU-xun/out/xun/xun-smp.adt --smp
 
@@ -155,6 +155,13 @@ jobs:
           new = '{ [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" != 1 ] && [ "${XNU_SOURCE_STORAGE:-0}" != 1 ] && [ "${XNU_NATIVE_UFS:-0}" != 1 ]; }'
           assert old in text, 'Expected OWNER_ROOT_TRUST guard not found in build-xnu-4k-baseline.sh'
           p.write_text(text.replace(old, new, 1))
+
+          cap = Path('patches/xnu/native-4k-bootstrap-capacity.patch')
+          cap_text = cap.read_text()
+          cap_old = '#define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 16)'
+          cap_new = '#define BOOTSTRAP_TABLE_SIZE (ARM_PGBYTES * 24)'
+          assert cap_old in cap_text, 'Expected BOOTSTRAP_TABLE_SIZE 16-page entry missing'
+          cap.write_text(cap_text.replace(cap_old, cap_new, 1))
           PY
           python3 unixnu ipsw fetch KernelCache OS -D ../UniXNU-xun
           cp ../UniXNU-xun/package/xnu-patches/native-smp-type-clusters.patch patches/xnu/
