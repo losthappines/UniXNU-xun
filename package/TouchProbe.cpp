@@ -403,7 +403,7 @@ bool allocateDmaBuf(IOBufferMemoryDescriptor **descOut, uint8_t **cpuOut, uint64
 bool allocateDmaBuffers(Session &s) {
     if (!allocateDmaBuf(&s.dmaTxDesc, &s.dmaTxCpu, &s.dmaTxPhys)) return false;
     if (!allocateDmaBuf(&s.dmaRxDesc, &s.dmaRxCpu, &s.dmaRxPhys)) return false;
-    s.spi.dma = (struct geni_dma){
+    s.spi.dma = {
         nullptr, dmaClean, dmaCleanInval, dmaCleanInval,
         s.dmaTxCpu, s.dmaRxCpu, s.dmaTxPhys, s.dmaRxPhys, kDmaBufBytes
     };
