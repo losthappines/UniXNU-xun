@@ -733,13 +733,14 @@ void eventLoop(Session &s) {
             }
             if (rc == FTS8203_FRAME_EMPTY) {
                 s.idleReads++;
-                if (s.lastCount > 0) {
-                    s.lastCount = 0;
-                    touch_report r{};
-                    changed = true;
-                    native_hid_touch_update(&r);
+                if (lastCount > 0) {
+                    lastCount = 0;
+                    native_touch_frames = native_touch_frames + 1;
+                    publishContacts(s, 0, nullptr, nullptr, nullptr);
+                    rows(s);
+                } else if (s.reads <= 4 || (s.reads & 63u) == 0u) {
+                    rows(s);
                 }
-                if (s.reads <= 4 || (s.reads & 63u) == 0u || changed) rows(s);
                 IOSleep(4);
                 continue;
             }
