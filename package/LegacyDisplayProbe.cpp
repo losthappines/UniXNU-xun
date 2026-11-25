@@ -275,6 +275,61 @@ __attribute__((noinline)) void native_legacy_retirement_observed(IOService *disp
     native_legacy_retired_generation=completed;native_legacy_presented_generation=presented;native_legacy_retired_frames=frames;
     native_legacy_retirement_calls=native_legacy_retirement_calls+1;
 }
+// Display 180-degree clockwise rotation (default on for xun; override with xun-fb-rotate=0).
+extern "C" int native_legacy_fb_rotate_180(void) {
+    static int cached=-1;
+    if(cached<0) {
+        unsigned r=180;
+        PE_parse_boot_argn("xun-fb-rotate",&r,sizeof r);
+        cached=(r==180)?1:0;
+    }
+    return cached;
+}
+extern "C" int native_legacy_copy_pixels_180(volatile void *destination,
+    uint64_t destinationBytes,uint64_t destinationStride,const void *source,
+    uint64_t sourceBytes,uint64_t sourceStride,uint32_t width,uint32_t height) {
+    uintptr_t dst=(uintptr_t)destination,src=(uintptr_t)source;
+    if(!dst || !src || !width || !height || width>16384 || height>16384)return 0;
+    uint64_t rowBytes=(uint64_t)width*4;
+    if(destinationStride<rowBytes || sourceStride<rowBytes)return 0;
+    uint64_t dstNeed=(uint64_t)(height-1)*destinationStride+rowBytes;
+    uint64_t srcNeed=(uint64_t)(height-1)*sourceStride+rowBytes;
+    if(dstNeed>destinationBytes || srcNeed>sourceBytes)return 0;
+    if(dst>UINTPTR_MAX-dstNeed || src>UINTPTR_MAX-srcNeed)return 0;
+    const int wide=!(dst&7) && !(destinationStride&7) && !(width&1);
+    for(uint32_t drow=0;drow<height;++drow) {
+        const unsigned char *in=(const unsigned char *)(src+(uint64_t)(height-1u-drow)*sourceStride);
+        volatile uint32_t *out=(volatile uint32_t *)(dst+(uint64_t)drow*destinationStride);
+        if(wide) {
+            volatile uint64_t *out64=(volatile uint64_t *)out;
+            uint32_t dcol=0;
+            for(;dcol+8<=width;dcol+=8) {
+                const uint32_t s=width-8u-dcol;
+                uint64_t a,b,c,d;
+                __builtin_memcpy(&d,in+(uint64_t)s*4,8);
+                __builtin_memcpy(&c,in+(uint64_t)s*4+8,8);
+                __builtin_memcpy(&b,in+(uint64_t)s*4+16,8);
+                __builtin_memcpy(&a,in+(uint64_t)s*4+24,8);
+                out64[dcol/2]=(a<<32)|(a>>32);
+                out64[dcol/2+1]=(b<<32)|(b>>32);
+                out64[dcol/2+2]=(c<<32)|(c>>32);
+                out64[dcol/2+3]=(d<<32)|(d>>32);
+            }
+            for(;dcol+2<=width;dcol+=2) {
+                uint64_t pair;
+                __builtin_memcpy(&pair,in+(uint64_t)(width-2u-dcol)*4,8);
+                out64[dcol/2]=(pair<<32)|(pair>>32);
+            }
+        } else {
+            for(uint32_t dcol=0;dcol<width;++dcol) {
+                uint32_t value;
+                __builtin_memcpy(&value,in+(uint64_t)(width-1u-dcol)*4,4);
+                out[dcol]=value;
+            }
+        }
+    }
+    return 1;
+}
 // The display object's properties as they are now (the registration copy above predates setDisplayRefreshProperties and the rest): for the
 // UFS log. Returns the bytes written (NUL-terminated).
 extern "C" unsigned native_legacy_properties_now(char *out,unsigned cap) {

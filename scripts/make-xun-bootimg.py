@@ -28,7 +28,7 @@ from pathlib import Path
 FD_BASE = 0x5FC00000
 FD_SIZE = 0x300000
 SHIM_SIZE = 0x1000
-INITRD_ADDR = 0x70000000
+INITRD_ADDR = 0x78400000
 
 
 def mov64(rd: int, val: int) -> list[int]:

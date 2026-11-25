@@ -190,6 +190,24 @@ for i in range(168, 358):
 header += '};\nstatic_assert(sizeof(IOMobileFramebufferLegacy)==0x18a0,"Actual original instance extent");\n'
 (OUT / 'OriginalLegacyFramebufferABI.h').write_text(header)
 
+# Wire optional 180-degree display rotation (default on via LegacyDisplayProbe) into NativeLegacyDisplay.cpp.
+nld_cpp = ROOT / 'drivers/GopFramebuffer/NativeLegacyDisplay.cpp'
+nld_text = nld_cpp.read_text()
+decl_marker = 'extern "C" int native_legacy_fb_rotate_180(void);'
+if decl_marker not in nld_text:
+    nld_text = nld_text.replace(
+        'extern "C" bool native_legacy_gop_mapping_observed(IOService *,IOMemoryMap *,uint32_t,uint32_t);',
+        'extern "C" bool native_legacy_gop_mapping_observed(IOService *,IOMemoryMap *,uint32_t,uint32_t);\n'
+        'extern "C" int native_legacy_fb_rotate_180(void);\n'
+        'extern "C" int native_legacy_copy_pixels_180(volatile void *,uint64_t,uint64_t,const void *,uint64_t,uint64_t,uint32_t,uint32_t);',
+        1,
+    )
+    old_call = 'if(!native_legacy_copy_pixels(reinterpret_cast<volatile void *>(bootMapping->getVirtualAddress()),'
+    new_call = 'if(!(native_legacy_fb_rotate_180()?native_legacy_copy_pixels_180:native_legacy_copy_pixels)(reinterpret_cast<volatile void *>(bootMapping->getVirtualAddress()),'
+    require(old_call in nld_text, 'Missing native_legacy_copy_pixels call site in NativeLegacyDisplay.cpp')
+    nld_text = nld_text.replace(old_call, new_call, 1)
+    nld_cpp.write_text(nld_text)
+
 print(run(['python3', ROOT / 'scripts/build-arm-driver.py', 'NativeLegacyDisplay'], text=True), end='')
 obj = OUT / 'NativeLegacyDisplay.o'
 raw = obj.read_bytes()
