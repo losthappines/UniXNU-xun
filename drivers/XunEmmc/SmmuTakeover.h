@@ -48,8 +48,6 @@ inline SmmuResult configureSdhciSmmuBypass(uint16_t streamId = kSdhci1StreamId) 
   res.probed = true;
   res.idr0 = smmuRead32(base, 0x20U);
   res.idr1 = smmuRead32(base, 0x24U);
-  res.fsr = smmuRead32(base, 0x48U);  // sGFSR
-  if (res.fsr) smmuWrite32(base, 0x48U, res.fsr);
 
   // sCR0 bit 0 (CLIENTPD): if SMMU global client port disable is set, DMA already bypasses.
   const uint32_t scr0 = smmuRead32(base, 0x0U);
@@ -141,13 +139,6 @@ inline SmmuResult configureSdhciSmmuBypass(uint16_t streamId = kSdhci1StreamId) 
   const uint32_t cbarOff = pagesize + static_cast<uint32_t>(bank) * 4U;
   const uint32_t cba2rOff = pagesize + 0x800U + static_cast<uint32_t>(bank) * 4U;
 
-  // Clear any stale context fault before disabling Stage 1.
-  const uint32_t cbFsr = smmuRead32(base, cbOff + 0x58U);
-  if (cbFsr) {
-    if (!res.fsr) res.fsr = cbFsr;
-    smmuWrite32(base, cbOff + 0x58U, cbFsr);
-  }
-
   smmuWrite32(base, cbOff + 0x0U, 0U);  // CB_SCTLR.M = 0 (Stage-1 disabled -> 1:1)
   if ((smmuRead32(base, cbOff + 0x0U) & 1U) != 0U) {
     map->release();
@@ -163,6 +154,7 @@ inline SmmuResult configureSdhciSmmuBypass(uint16_t streamId = kSdhci1StreamId) 
     map->release();
     return res;
   }
+  __asm__ volatile("dsb sy" ::: "memory");
 
   // Program S2CR (TYPE = 0 translation -> bank) then valid SMR.
   const uint32_t s2crOff = 0xC00U + static_cast<uint32_t>(slot) * 4U;
@@ -178,13 +170,7 @@ inline SmmuResult configureSdhciSmmuBypass(uint16_t streamId = kSdhci1StreamId) 
     map->release();
     return res;
   }
-
-  // Invalidate NS TLBs so stale translations/faults for this SID clear.
-  smmuWrite32(base, 0x70U, 0U);
-  smmuWrite32(base, 0x74U, 0U);
-  for (uint32_t wait = 0; wait < 10000U; ++wait) {
-    if ((smmuRead32(base, 0x78U) & 1U) == 0U) break;
-  }
+  __asm__ volatile("dsb sy" ::: "memory");
 
   res.bypassed = true;
   map->release();
