@@ -18,7 +18,7 @@ constexpr uint64_t kGccSdcc1Base    = 0x01438000ULL;
 constexpr uint64_t kGccSdcc1Size    = 0x00001000ULL;
 
 constexpr uint32_t kEmmcSectorBytes = 512U;
-constexpr uint32_t kMaxChunkSectors = 128U;  // 64 KiB per transfer
+constexpr uint32_t kMaxChunkSectors = 512U;  // 256 KiB per transfer (4x 64 KiB ADMA2 descriptors)
 
 // Standard SDHCI registers (sdhci@4744000)
 enum SdhciReg : uint32_t {
@@ -185,10 +185,17 @@ struct SdhciController {
   uint32_t vendorSpec = 0;
   uint16_t hostVersion = 0;
   uint8_t hostCtrl = 0;
+  uint16_t hostCtrl2 = 0;
   uint16_t clockCtrl = 0;
+  uint8_t admaErr = 0;
+  int32_t smmuCb = -1;
+  uint32_t smmuFsr = 0;
   uint64_t readOps = 0;
   uint64_t writeOps = 0;
   uint64_t readErrors = 0;
+  uint64_t dmaFallbacks = 0;
+  uint64_t bytesDma = 0;
+  uint64_t bytesPio = 0;
 
   uint8_t r8(uint32_t off) const {
     return *reinterpret_cast<volatile uint8_t *>(base + off);
@@ -544,7 +551,8 @@ struct SdhciController {
 
   bool allocateDmaBuffers() {
     if (dmaDesc && admaDesc) return true;
-    const uint64_t mask = useAdma64 ? 0xFFFFFFFFFFFFFFFFULL : 0x00000000FFFFFFFFULL;
+    // Keep DMA buffers page-aligned below 4 GiB so both 32-bit and 64-bit ADMA2 work cleanly.
+    const uint64_t mask = 0x00000000FFFFF000ULL;
     const IOOptionBits bufOpts =
         static_cast<IOOptionBits>(kIODirectionInOut) |
         static_cast<IOOptionBits>(kIOMemoryPhysicallyContiguous);
@@ -561,12 +569,21 @@ struct SdhciController {
       if (admaDesc) { admaDesc->release(); admaDesc = nullptr; }
       return false;
     }
-    IOByteCount segLen = 0;
-    dmaPhys = dmaDesc->getPhysicalSegment(0, &segLen);
-    admaPhys = admaDesc->getPhysicalSegment(0, &segLen);
+    IOByteCount dmaSegLen = 0, admaSegLen = 0;
+    dmaPhys = dmaDesc->getPhysicalSegment(0, &dmaSegLen);
+    admaPhys = admaDesc->getPhysicalSegment(0, &admaSegLen);
     dmaBuf = static_cast<uint8_t *>(dmaDesc->getBytesNoCopy());
     admaBuf = static_cast<uint8_t *>(admaDesc->getBytesNoCopy());
-    if (!dmaPhys || !admaPhys || !dmaBuf || !admaBuf) return false;
+    if (!dmaPhys || !admaPhys || !dmaBuf || !admaBuf ||
+        (dmaPhys >> 32) || (admaPhys >> 32) ||
+        dmaSegLen < static_cast<IOByteCount>(kMaxChunkSectors * kEmmcSectorBytes) ||
+        admaSegLen < 4096U) {
+      dmaDesc->complete();
+      admaDesc->complete();
+      dmaDesc->release(); dmaDesc = nullptr; dmaBuf = nullptr; dmaPhys = 0;
+      admaDesc->release(); admaDesc = nullptr; admaBuf = nullptr; admaPhys = 0;
+      return false;
+    }
     return true;
   }
 
@@ -627,17 +644,28 @@ struct SdhciController {
 
     // Read current host control & optional DMA setup.
     hostCtrl = r8(kHostControl);
+    hostCtrl2 = r16(kHostControl2);
     clockCtrl = r16(kClockControl);
     if (enableDma) {
-      const uint16_t hc2 = r16(kHostControl2);
-      useAdma64 = (hc2 & kHost2Addr64Bit) != 0U || (caps0 & (1U << 28)) != 0U;
-      if (useAdma64) {
-        w16(kHostControl2, hc2 | kHost2Ver4En | kHost2Addr64Bit);
+      const bool wantAdma64 = (hostCtrl2 & kHost2Addr64Bit) != 0U || (caps0 & (1U << 28)) != 0U;
+      if (wantAdma64) {
+        w16(kHostControl2, hostCtrl2 | kHost2Ver4En | kHost2Addr64Bit);
+      }
+      hostCtrl2 = r16(kHostControl2);
+      // Use 16-byte Adma2Desc64 only when both V4_MODE and 64BIT_ADDR latch; otherwise
+      // clear 64BIT_ADDR and use 8-byte Adma2Desc32 (safe since DMA buffers are < 4 GiB).
+      useAdma64 = (hostCtrl2 & (kHost2Ver4En | kHost2Addr64Bit)) == (kHost2Ver4En | kHost2Addr64Bit);
+      if (!useAdma64 && (hostCtrl2 & kHost2Addr64Bit)) {
+        w16(kHostControl2, hostCtrl2 & ~kHost2Addr64Bit);
+        hostCtrl2 = r16(kHostControl2);
       }
       SmmuResult smmu = configureSdhciSmmuBypass(kSdhci1StreamId);
+      smmuCb = smmu.chosenCb;
+      smmuFsr = smmu.fsr;
       if (smmu.bypassed && allocateDmaBuffers()) {
         useDma = true;
         w8(kHostControl, (hostCtrl & ~kHostDmaMask) | (useAdma64 ? kHostDmaAdma64 : kHostDmaAdma32));
+        hostCtrl = r8(kHostControl);
       } else {
         useDma = false;
       }
@@ -739,20 +767,29 @@ struct SdhciController {
     const uint32_t bytes = nblks * kEmmcSectorBytes;
     invalidateDataCacheRange(dmaBuf, bytes);
 
-    if (useAdma64) {
-      auto *desc = reinterpret_cast<Adma2Desc64 *>(admaBuf);
-      desc->attr = kAdmaValid | kAdmaEnd | kAdmaTran;
-      desc->len = static_cast<uint16_t>(bytes & 0xFFFFU);
-      desc->addr = dmaPhys;
-      desc->reserved = 0U;
-      cleanDataCacheRange(desc, sizeof(*desc));
-    } else {
-      auto *desc = reinterpret_cast<Adma2Desc32 *>(admaBuf);
-      desc->attr = kAdmaValid | kAdmaEnd | kAdmaTran;
-      desc->len = static_cast<uint16_t>(bytes & 0xFFFFU);
-      desc->addr = static_cast<uint32_t>(dmaPhys);
-      cleanDataCacheRange(desc, sizeof(*desc));
+    uint32_t descCount = 0;
+    uint32_t off = 0;
+    while (off < bytes) {
+      const uint32_t segLen = (bytes - off > 65536U) ? 65536U : (bytes - off);
+      const bool isLast = (off + segLen == bytes);
+      const uint16_t attr = kAdmaValid | kAdmaTran | (isLast ? kAdmaEnd : 0U);
+      const uint16_t encLen = static_cast<uint16_t>(segLen & 0xFFFFU);  // 0 encodes 64 KiB
+      if (useAdma64) {
+        auto *desc = reinterpret_cast<Adma2Desc64 *>(admaBuf) + descCount;
+        desc->attr = attr;
+        desc->len = encLen;
+        desc->addr = dmaPhys + off;
+        desc->reserved = 0U;
+      } else {
+        auto *desc = reinterpret_cast<Adma2Desc32 *>(admaBuf) + descCount;
+        desc->attr = attr;
+        desc->len = encLen;
+        desc->addr = static_cast<uint32_t>(dmaPhys + off);
+      }
+      ++descCount;
+      off += segLen;
     }
+    cleanDataCacheRange(admaBuf, descCount * (useAdma64 ? sizeof(Adma2Desc64) : sizeof(Adma2Desc32)));
 
     w16(kIntStatus, 0xFFFFU);
     w16(kErrIntStatus, 0xFFFFU);
@@ -779,6 +816,7 @@ struct SdhciController {
       if (st & kIntError) {
         lastIntStatus = st;
         lastErrInt = r16(kErrIntStatus);
+        admaErr = r8(kAdmaErrStatus);
         w16(kErrIntStatus, 0xFFFFU);
         w16(kIntStatus, 0xFFFFU);
         if (multi) sendCommand(12U, 0U, kCmdCrcCheck | kCmdIndexCheck | kCmdResp48Busy);
@@ -812,11 +850,17 @@ struct SdhciController {
     while (done < count) {
       const uint32_t chunk = (count - done > kMaxChunkSectors) ? kMaxChunkSectors : (count - done);
       bool ok = false;
+      bool usedDma = false;
       if (useDma) {
         ok = readChunkAdma2(lba + done, chunk, out);
-        if (!ok) {
+        if (ok) {
+          usedDma = true;
+        } else {
           // Graceful runtime fallback to PIO if ADMA/SMMU fails on a board state.
+          ++dmaFallbacks;
           useDma = false;
+          IOLog("NativeEmmc: ADMA2 failed int=0x%x err=0x%x adma=0x%x cmd=%u; falling back to PIO\n",
+                lastIntStatus, lastErrInt, admaErr, lastCmd);
         }
       }
       if (!ok) {
@@ -836,6 +880,8 @@ struct SdhciController {
         ++readErrors;
         return false;
       }
+      if (usedDma) bytesDma += static_cast<uint64_t>(chunk) * kEmmcSectorBytes;
+      else bytesPio += static_cast<uint64_t>(chunk) * kEmmcSectorBytes;
       done += chunk;
       out += chunk * kEmmcSectorBytes;
     }

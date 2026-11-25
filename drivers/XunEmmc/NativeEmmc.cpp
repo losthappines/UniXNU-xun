@@ -46,10 +46,17 @@ volatile uint64_t native_emmc_userdata_first_lba = 0;
 volatile uint64_t native_emmc_userdata_last_lba = 0;
 volatile uint64_t native_emmc_reads = 0;
 volatile uint64_t native_emmc_read_errors = 0;
+volatile uint64_t native_emmc_dma_fallbacks = 0;
+volatile uint64_t native_emmc_bytes_dma = 0;
+volatile uint64_t native_emmc_bytes_pio = 0;
+volatile int32_t native_emmc_smmu_cb = -1;
+volatile uint32_t native_emmc_smmu_fsr = 0;
+volatile uint32_t native_emmc_adma_err = 0;
 
 volatile uint64_t native_ufs_block_reads = 0;
 volatile uint64_t native_ufs_verified_blocks = 0;
 volatile uint64_t native_ufs_block_failures = 0;
+volatile uint64_t native_ufs_read_ticks __attribute__((weak_import));
 volatile uint32_t native_ufs_integrity_failures = 0;
 volatile uint32_t native_ufs_blocks_published = 0;
 
@@ -290,6 +297,8 @@ IOReturn NativeEmmcBlock::doAsyncReadWrite(IOMemoryDescriptor *buffer, UInt64 bl
   UInt64 actual = 0;
   IOReturn result = kIOReturnNotReady;
   const UInt64 totalBytes = count * kEmmcSectorBytes;
+  uint64_t t0 = 0;
+  __asm__ volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(t0));
 
   IOLockLock(ctrl->gate);
   while (online && actual < totalBytes) {
@@ -301,6 +310,7 @@ IOReturn NativeEmmcBlock::doAsyncReadWrite(IOMemoryDescriptor *buffer, UInt64 bl
     if (!ctrl->sdhci.readSectors(lba, chunkSectors, ctrl->bounceBuf)) {
       native_emmc_last_err_int = ctrl->sdhci.lastErrInt;
       native_emmc_last_int = ctrl->sdhci.lastIntStatus;
+      native_emmc_adma_err = ctrl->sdhci.admaErr;
       native_emmc_read_errors = ctrl->sdhci.readErrors;
       native_ufs_block_failures = native_ufs_block_failures + 1U;
       result = kIOReturnIOError;
@@ -318,7 +328,17 @@ IOReturn NativeEmmcBlock::doAsyncReadWrite(IOMemoryDescriptor *buffer, UInt64 bl
     result = kIOReturnSuccess;
   }
   native_emmc_reads = ctrl->sdhci.readOps;
+  native_emmc_dma_fallbacks = ctrl->sdhci.dmaFallbacks;
+  native_emmc_bytes_dma = ctrl->sdhci.bytesDma;
+  native_emmc_bytes_pio = ctrl->sdhci.bytesPio;
+  native_emmc_dma_enabled = ctrl->sdhci.useDma ? 1U : 0U;
+  native_emmc_adma_err = ctrl->sdhci.admaErr;
   IOLockUnlock(ctrl->gate);
+  uint64_t t1 = 0;
+  __asm__ volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(t1));
+  if (&native_ufs_read_ticks && t1 >= t0) {
+    __atomic_fetch_add(&native_ufs_read_ticks, t1 - t0, __ATOMIC_RELAXED);
+  }
 
   completion->action(completion->target, completion->parameter, result, actual);
   return kIOReturnSuccess;
@@ -367,12 +387,13 @@ bool NativeUfs::start(IOService *provider) {
   state->bounceBuf = static_cast<uint8_t *>(IOMallocZero(ControllerState::kBounceBytes));
   if (!state->gate || !state->bounceBuf) return false;
 
-  uint32_t dmaArg = 0;
+  // Default to ADMA2 DMA (with SM6225 apps-smmu CB bypass and automatic PIO fallback).
+  // Pass native-emmc-dma=0 on cmdline to force polled PIO.
+  uint32_t dmaArg = 1;
   PE_parse_boot_argn("native-emmc-dma", &dmaArg, sizeof(dmaArg));
-  native_emmc_dma_enabled = dmaArg ? 1U : 0U;
-  IOLog("NativeEmmc: starting probe on %s (dma=%u)\n",
+  IOLog("NativeEmmc: starting probe on %s (dma_req=%u)\n",
         provider && provider->getName() ? provider->getName() : "sdhci",
-        static_cast<unsigned>(native_emmc_dma_enabled));
+        static_cast<unsigned>(dmaArg != 0U));
 
   native_emmc_stage = 2;
   if (!state->sdhci.init(provider, dmaArg != 0U)) {
@@ -388,6 +409,9 @@ bool NativeUfs::start(IOService *provider) {
     return false;
   }
 
+  native_emmc_dma_enabled = state->sdhci.useDma ? 1U : 0U;
+  native_emmc_smmu_cb = state->sdhci.smmuCb;
+  native_emmc_smmu_fsr = state->sdhci.smmuFsr;
   native_emmc_controller_stage = state->sdhci.stage;
   native_emmc_rca = state->sdhci.rca;
   native_emmc_sectors = state->sdhci.sectorCount;
@@ -395,11 +419,16 @@ bool NativeUfs::start(IOService *provider) {
   native_emmc_host_version = state->sdhci.hostVersion;
   native_emmc_caps0 = state->sdhci.caps0;
   native_emmc_vendor_spec = state->sdhci.vendorSpec;
-  IOLog("NativeEmmc: eMMC ready rca=%u sectors=%llu fallback=%u hcVer=0x%x\n",
+  IOLog("NativeEmmc: eMMC ready rca=%u sectors=%llu dma=%u adma64=%u cb=%d fb=%u hc=%x/%x clk=%x\n",
         static_cast<unsigned>(state->sdhci.rca),
         static_cast<unsigned long long>(state->sdhci.sectorCount),
+        static_cast<unsigned>(native_emmc_dma_enabled),
+        static_cast<unsigned>(state->sdhci.useAdma64 ? 1U : 0U),
+        static_cast<int>(native_emmc_smmu_cb),
         static_cast<unsigned>(native_emmc_fallback_reinit),
-        static_cast<unsigned>(state->sdhci.hostVersion));
+        static_cast<unsigned>(state->sdhci.hostCtrl),
+        static_cast<unsigned>(state->sdhci.hostCtrl2),
+        static_cast<unsigned>(state->sdhci.clockCtrl));
 
   native_emmc_stage = 3;
   uint8_t *scratch = static_cast<uint8_t *>(IOMallocZero(16384U));
@@ -757,14 +786,24 @@ int storeTransfer(uint64_t block, uint32_t count, void *readDst, const void *wri
 
 extern "C" void native_ufs_progress_text(char *dst, size_t size) {
   if (!dst || !size) return;
+  const uint32_t hc = gCtrlState ? gCtrlState->sdhci.hostCtrl : 0U;
+  const uint32_t hc2 = gCtrlState ? gCtrlState->sdhci.hostCtrl2 : 0U;
+  const uint32_t clk = gCtrlState ? gCtrlState->sdhci.clockCtrl : 0U;
   snprintf(dst, size,
-           "emmc st=%u rdy=%u pub=%u r=%llu err=%llu sec=%llu",
+           "CMD emmc st=%u dma=%u fb=%u/%llu cb=%d fsr=%x err=%x/%x hc=%x/%x clk=%x dmaMiB=%llu pioMiB=%llu",
            static_cast<unsigned>(native_emmc_stage),
-           static_cast<unsigned>(native_emmc_ready),
-           static_cast<unsigned>(native_ufs_blocks_published),
-           static_cast<unsigned long long>(native_emmc_reads),
-           static_cast<unsigned long long>(native_emmc_read_errors),
-           static_cast<unsigned long long>(native_emmc_sectors));
+           static_cast<unsigned>(native_emmc_dma_enabled),
+           static_cast<unsigned>(native_emmc_fallback_reinit),
+           static_cast<unsigned long long>(native_emmc_dma_fallbacks),
+           static_cast<int>(native_emmc_smmu_cb),
+           static_cast<unsigned>(native_emmc_smmu_fsr),
+           static_cast<unsigned>(native_emmc_last_err_int),
+           static_cast<unsigned>(native_emmc_adma_err),
+           static_cast<unsigned>(hc),
+           static_cast<unsigned>(hc2),
+           static_cast<unsigned>(clk),
+           static_cast<unsigned long long>(native_emmc_bytes_dma >> 20),
+           static_cast<unsigned long long>(native_emmc_bytes_pio >> 20));
 }
 
 // Persistent Data window hooks (NativeRamBlock / PersistOverlay expect 4096-byte blocks and 1=ok, 0=fail).
