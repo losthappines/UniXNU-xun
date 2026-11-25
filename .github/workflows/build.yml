@@ -137,8 +137,9 @@ jobs:
           path: |
             UniXNU/out/xun/tree/build/xnu
             UniXNU/out/xun/tree/.cache/xnu-work
-          key: xnu-obj-e72db44-${{ hashFiles('UniXNU-xun/configs/xun_defconfig', 'UniXNU-xun/package/xnu-patches/**') }}-${{ github.run_id }}
-          restore-keys: xnu-obj-e72db44-${{ hashFiles('UniXNU-xun/configs/xun_defconfig', 'UniXNU-xun/package/xnu-patches/**') }}-
+            UniXNU/out/xun/tree/.cache/fakeroot
+          key: xnu-obj-v2-e72db44-${{ hashFiles('UniXNU-xun/configs/xun_defconfig', 'UniXNU-xun/package/xnu-patches/**') }}-${{ github.run_id }}
+          restore-keys: xnu-obj-v2-e72db44-${{ hashFiles('UniXNU-xun/configs/xun_defconfig', 'UniXNU-xun/package/xnu-patches/**') }}-
 
       - name: Install Toolchain Tools
         run: |
