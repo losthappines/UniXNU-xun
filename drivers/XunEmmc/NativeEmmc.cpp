@@ -56,7 +56,7 @@ volatile uint32_t native_emmc_adma_err = 0;
 volatile uint64_t native_ufs_block_reads = 0;
 volatile uint64_t native_ufs_verified_blocks = 0;
 volatile uint64_t native_ufs_block_failures = 0;
-volatile uint64_t native_ufs_read_ticks __attribute__((weak_import));
+extern volatile uint64_t native_ufs_read_ticks __attribute__((weak_import));
 volatile uint32_t native_ufs_integrity_failures = 0;
 volatile uint32_t native_ufs_blocks_published = 0;
 
