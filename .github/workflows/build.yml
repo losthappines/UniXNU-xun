@@ -22,21 +22,33 @@ jobs:
         with:
           path: UniXNU-xun
 
+      - name: Cache UEFI Firmware Volume
+        id: uefi_cache
+        uses: actions/cache@v4
+        with:
+          path: Mu-Silicium/Build/xunPkg
+          key: uefi-fb4efb37-${{ hashFiles('UniXNU-xun/uefi/**', 'UniXNU-xun/scripts/patch-mu-sec-entryarg.py', 'UniXNU-xun/scripts/check-xun.py') }}
+
       - name: Check out UniXNU
+        if: steps.uefi_cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
+          ref: e72db44d10166d9c833e0c859c84e1b6c2cc4f48
           path: UniXNU
           submodules: recursive
 
       - name: Check out Mu-Silicium
+        if: steps.uefi_cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: Project-Silicium/Mu-Silicium
+          ref: fb4efb37b4ac289ce83ad94c7acb73defb87955c
           path: Mu-Silicium
           submodules: recursive
 
       - name: Install Build Dependencies
+        if: steps.uefi_cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -44,6 +56,7 @@ jobs:
             mtools dosfstools device-tree-compiler git python3 python3-pip
 
       - name: Scaffold & Verify xunPkg in Mu-Silicium
+        if: steps.uefi_cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p Mu-Silicium/Platforms/Xiaomi/xunPkg
           mkdir -p Mu-Silicium/Resources/Configs
@@ -65,6 +78,7 @@ jobs:
           python3 UniXNU-xun/scripts/check-xun.py
 
       - name: Build UEFI Firmware Volume (SILICIUM_UEFI.fd)
+        if: steps.uefi_cache.outputs.cache-hit != 'true'
         working-directory: UniXNU
         run: |
           python3 unixnu build firmware --uefi ../Mu-Silicium -D ../UniXNU-xun
@@ -97,6 +111,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
+          ref: e72db44d10166d9c833e0c859c84e1b6c2cc4f48
           path: UniXNU
           submodules: recursive
 
@@ -104,7 +119,26 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Project-Silicium/Mu-Silicium
+          ref: fb4efb37b4ac289ce83ad94c7acb73defb87955c
           path: Mu-Silicium
+
+      - name: Cache UniXNU Feeds & IPSW
+        uses: actions/cache@v4
+        with:
+          path: |
+            UniXNU/out/feeds
+            UniXNU/out/ipsw
+          key: xnu-feeds-ipsw-e72db44-${{ hashFiles('UniXNU-xun/board.toml') }}
+          restore-keys: xnu-feeds-ipsw-e72db44-
+
+      - name: Cache Incremental XNU Build Objects
+        uses: actions/cache@v4
+        with:
+          path: |
+            UniXNU/out/xun/tree/build/xnu
+            UniXNU/out/xun/tree/.cache/xnu-work
+          key: xnu-obj-e72db44-${{ hashFiles('UniXNU-xun/configs/xun_defconfig', 'UniXNU-xun/package/xnu-patches/**') }}-${{ github.run_id }}
+          restore-keys: xnu-obj-e72db44-${{ hashFiles('UniXNU-xun/configs/xun_defconfig', 'UniXNU-xun/package/xnu-patches/**') }}-
 
       - name: Install Toolchain Tools
         run: |
@@ -223,6 +257,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
+          ref: e72db44d10166d9c833e0c859c84e1b6c2cc4f48
           path: UniXNU
           submodules: recursive
 
@@ -230,6 +265,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Project-Silicium/Mu-Silicium
+          ref: fb4efb37b4ac289ce83ad94c7acb73defb87955c
           path: Mu-Silicium
 
       - name: Install Packaging Dependencies
