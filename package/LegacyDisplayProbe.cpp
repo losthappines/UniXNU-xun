@@ -11,6 +11,7 @@
 #include <libkern/c++/OSSerialize.h>
 #include <libkern/c++/OSData.h>
 #include <kern/task.h>
+#include <kern/thread.h>
 #include <sys/proc.h>
 #include <pexpert/pexpert.h>
 #include <mach/kmod.h>
@@ -548,10 +549,25 @@ extern void native_touch_probe(void);
 extern void xun_buttons_probe(void);
 extern void tb128fu_gpu_probe(void);
 extern void tb128fu_usb_probe(void);
-// TB128FU: sheng's CPU frequency and GPU power probes drive sheng hardware and are not in this board's archive; the touch and
-// GPU probes are this board's own (TouchProbe.cpp, Himax HX83102E, tb128fu-touch=<stage>; GpuProbe.cpp, Adreno 610,
-// tb128fu-gpu=<stage>; both default off), and so is the USB log channel (UsbLog.cpp, its stage in the source).
+extern "C" int xun_rpm_boost_clocks(void) __attribute__((weak_import));
+extern "C" int xun_cpufreq_apply(void) __attribute__((weak_import));
+static void xunPerfThread(void *, wait_result_t) {
+    if (&xun_rpm_boost_clocks) (void)xun_rpm_boost_clocks();
+    if (&xun_cpufreq_apply) {
+        for (unsigned i = 0; i < 20; ++i) {
+            if ((xun_cpufreq_apply() & 3) == 3) break;
+            IOSleep(250);
+        }
+    }
+}
+// Early boot performance boost spawns CPU/DDR scaling via CpuFreq.c and RpmGlink.cpp.
 void native_legacy_display_late_probe(void) {
+    unsigned perfBoost = 1;
+    PE_parse_boot_argn("xun-perf-boost", &perfBoost, sizeof perfBoost);
+    if (perfBoost) {
+        thread_t perfThread = nullptr;
+        if (kernel_thread_start(xunPerfThread, nullptr, &perfThread) == KERN_SUCCESS) thread_deallocate(perfThread);
+    }
     native_keystore_probe();
     native_hid_input_probe();
     xun_buttons_probe();

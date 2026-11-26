@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 // Touch controller bring-up for Xiaomi Redmi Pad SE (xun, SM6225 QUPv3 SE0 SPI).
 // Supports all three m84 (1200x1920) panels over SPI SE0 (GPIO0..3, CS0, IRQ GPIO80, RST GPIO86):
-//   - BOE / Huaxing (CSOT): FocalTech FT8203 SPI (1536x2400 raw touch grid)
+//   - BOE / Huaxing (CSOT): FocalTech FT8203 SPI (1200x1920 12-bit coords)
 //   - Tianma: Novatek NT36532 SPI (65-byte checksummed coordinate packets)
 // Boot args:
 //   xun-touch=<1..5>   (or touch=<1..5> / tb128fu-touch=<1..5>; 5 = live touch)
 //   xun-touch-fw=<0|1|2>  (0 = auto [Huaxing/BOE FT8203 or Tianma NVT], 1 = force BOE FT8203, 2 = force Huaxing FT8203)
-//   xun-touch-flip=<0|1>  (0 = upright GOP coords [default], 1 = invert X/Y)
+//   xun-touch-flip=<0|1>  (0 = default [auto-synced with xun-fb-rotate], 1 = toggle 180-deg X/Y flip)
+//   xun-touch-orient=<0..7> (bitmask: 1=flip_x, 2=flip_y, 4=swap_xy; XORed with 180-deg display rotation)
 #include <IOKit/IOService.h>
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
@@ -31,6 +32,7 @@ extern const uint32_t native_xun_fw_tianma_size;
 extern volatile uint32_t native_touch_seq, native_touch_count;
 extern volatile int native_touch_xs[12], native_touch_ys[12], native_touch_ids[12];
 void native_touch_published(void);
+int native_legacy_fb_rotate_180(void) __attribute__((weak_import));
 }
 
 extern "C" {
@@ -48,7 +50,8 @@ volatile uint32_t native_touch_auto_done;
 }
 
 namespace {
-constexpr uint32_t kFtsRawWidth = 1536, kFtsRawHeight = 2400;
+constexpr uint32_t kFtsRawWidth = XUN_PANEL_WIDTH, kFtsRawHeight = XUN_PANEL_HEIGHT;
+constexpr int kHidAxisMaxX = 12000, kHidAxisMaxY = 19200;
 constexpr uint32_t kIntrCfg = 0x8, kIntrStatus = 0xc;
 constexpr uint32_t kIntrFallingLatch = (1u << 4) | (2u << 2) | (1u << 1);
 constexpr uint32_t kProbeHz = 1000000u;
@@ -130,6 +133,8 @@ struct Session {
     ChipKind kind = ChipKind::None;
     unsigned fwMode = 0;   // 0 auto, 1 boe, 2 huaxing
     unsigned flip = 0;
+    unsigned orient = 0;   // bit0=flip_x, bit1=flip_y, bit2=swap_xy
+    unsigned rawWOverride = 0, rawHOverride = 0;
     uint32_t rawW = XUN_PANEL_WIDTH, rawH = XUN_PANEL_HEIGHT;
     const uint8_t *activeFw = nullptr;
     size_t activeFwSize = 0;
@@ -734,17 +739,25 @@ void trackStrokes(unsigned count, const int *ids, const int *pxs, const int *pys
 
 void publishContacts(const Session &s, unsigned count, const int *ids, const int *rawXs, const int *rawYs) {
     int xs[12], ys[12], pxs[12], pys[12];
-    const int rw = static_cast<int>(s.rawW ? s.rawW : XUN_PANEL_WIDTH);
-    const int rh = static_cast<int>(s.rawH ? s.rawH : XUN_PANEL_HEIGHT);
+    int rw = static_cast<int>(s.rawWOverride ? s.rawWOverride : (s.rawW ? s.rawW : XUN_PANEL_WIDTH));
+    int rh = static_cast<int>(s.rawHOverride ? s.rawHOverride : (s.rawH ? s.rawH : XUN_PANEL_HEIGHT));
+    const unsigned fbRot = (native_legacy_fb_rotate_180 && native_legacy_fb_rotate_180()) ? 3u : 0u;
+    const unsigned effOrient = (s.orient ^ (s.flip ? 3u : 0u) ^ fbRot) & 7u;
     if (count > 12) count = 12;
     for (unsigned i = 0; i < count; ++i) {
         int rx = rawXs[i] < 0 ? 0 : (rawXs[i] >= rw ? rw - 1 : rawXs[i]);
         int ry = rawYs[i] < 0 ? 0 : (rawYs[i] >= rh ? rh - 1 : rawYs[i]);
-        if (s.flip) {rx = rw - 1 - rx; ry = rh - 1 - ry;}
-        xs[i] = static_cast<int>(static_cast<int64_t>(rx) * 30480 / rw);
-        ys[i] = static_cast<int>(static_cast<int64_t>(ry) * 20320 / rh);
-        pxs[i] = static_cast<int>(static_cast<int64_t>(rx) * XUN_PANEL_WIDTH / rw);
-        pys[i] = static_cast<int>(static_cast<int64_t>(ry) * XUN_PANEL_HEIGHT / rh);
+        int cw = rw, ch = rh;
+        if (effOrient & 4u) {
+            int tmp = rx; rx = ry; ry = tmp;
+            tmp = cw; cw = ch; ch = tmp;
+        }
+        if (effOrient & 1u) rx = cw - 1 - rx;
+        if (effOrient & 2u) ry = ch - 1 - ry;
+        xs[i] = (cw > 1) ? static_cast<int>(static_cast<int64_t>(rx) * (kHidAxisMaxX - 1) / (cw - 1)) : 0;
+        ys[i] = (ch > 1) ? static_cast<int>(static_cast<int64_t>(ry) * (kHidAxisMaxY - 1) / (ch - 1)) : 0;
+        pxs[i] = (cw > 1) ? static_cast<int>(static_cast<int64_t>(rx) * (XUN_PANEL_WIDTH - 1) / (cw - 1)) : 0;
+        pys[i] = (ch > 1) ? static_cast<int>(static_cast<int64_t>(ry) * (XUN_PANEL_HEIGHT - 1) / (ch - 1)) : 0;
     }
     trackStrokes(count, ids, pxs, pys);
     native_touch_seq = native_touch_seq + 1;
@@ -871,6 +884,9 @@ void touchThread(void *, wait_result_t) {
     if (!s) {fail(1, -12); return;}
     PE_parse_boot_argn("xun-touch-fw", &s->fwMode, sizeof s->fwMode);
     PE_parse_boot_argn("xun-touch-flip", &s->flip, sizeof s->flip);
+    PE_parse_boot_argn("xun-touch-orient", &s->orient, sizeof s->orient);
+    PE_parse_boot_argn("xun-touch-w", &s->rawWOverride, sizeof s->rawWOverride);
+    PE_parse_boot_argn("xun-touch-h", &s->rawHOverride, sizeof s->rawHOverride);
     PE_parse_boot_argn("xun-touch-dma", &s->forceDma, sizeof s->forceDma);
 
     const unsigned stage = native_touch_stage_req;

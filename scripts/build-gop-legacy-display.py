@@ -81,15 +81,35 @@ reference = ROOT / 'build/xnu-prelink/native-owner-ufs-cpu-desktop-tb128fu-candi
 shutil.copyfile(board_kernel, reference)
 shutil.copyfile(board_kernel.with_suffix('.json'), reference.with_suffix('.json'))
 
-# Ensure drivers/ShengHidInput is present in the build tree (copied from the device repo if not linked by components).
+# Ensure ShengHidInput/NativeHidInput.cpp exists in ROOT and patch its 3048x2032 maxima/edges to xun's 1200x1920 panel.
 hid_driver_dst = ROOT / 'drivers/ShengHidInput'
-if not (hid_driver_dst / 'NativeHidInput.cpp').exists():
+hid_cpp = hid_driver_dst / 'NativeHidInput.cpp'
+if not hid_cpp.exists():
     device_root = Path(os.environ.get('UNIXNU_DEVICE') or ROOT)
-    hid_driver_src = device_root / 'drivers/ShengHidInput'
-    require((hid_driver_src / 'NativeHidInput.cpp').exists(),
-            f'Missing ShengHidInput driver at {hid_driver_src}')
-    hid_driver_dst.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(hid_driver_src / 'NativeHidInput.cpp', hid_driver_dst / 'NativeHidInput.cpp')
+    hid_driver_src = device_root / 'drivers/ShengHidInput' / 'NativeHidInput.cpp'
+    if hid_driver_src.exists():
+        hid_driver_dst.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(hid_driver_src, hid_cpp)
+require(hid_cpp.exists(), f'Missing ShengHidInput driver at {hid_driver_dst}')
+hid_text = hid_cpp.read_text()
+hid_patched = (
+    hid_text
+    .replace(
+        'static const int32_t kEdgeX=48*65536/3048,kEdgeY=48*65536/2032;',
+        'static const int32_t kEdgeX=48*65536/1200,kEdgeY=48*65536/1920;',
+    )
+    .replace(
+        'unsigned x=transformCoordinate(xs[i],30480),y=transformCoordinate(ys[i],20320);',
+        'unsigned x=transformCoordinate(xs[i],12000),y=transformCoordinate(ys[i],19200);',
+    )
+)
+require(
+    'kEdgeX=48*65536/1200,kEdgeY=48*65536/1920;' in hid_patched
+    and 'transformCoordinate(xs[i],12000),y=transformCoordinate(ys[i],19200);' in hid_patched,
+    f'Unexpected NativeHidInput.cpp geometry lines in {hid_cpp}',
+)
+if hid_patched != hid_text:
+    hid_cpp.write_text(hid_patched)
 
 # Seed the qualified 21H461 runtime metadata checkpoint hash when running without a live QEMU gdb-stop.json.
 abi_json = ROOT / 'build/display-analysis/mobile-graphics-legacy-abi.json'
@@ -388,6 +408,11 @@ buttons_obj = OUT / 'ButtonProbe.o'
 run([str(buttons_source) if str(arg) == str(source) else str(buttons_obj) if str(arg) == str(OUT / 'LegacyDisplayProbe.o') else arg for arg in cmd] + touch_inc,
     cwd=r['directory'])
 
+rpm_source = kit_file('RpmGlink.cpp')
+rpm_obj = OUT / 'RpmGlink.o'
+run([str(rpm_source) if str(arg) == str(source) else str(rpm_obj) if str(arg) == str(OUT / 'LegacyDisplayProbe.o') else arg for arg in cmd],
+    cwd=r['directory'])
+
 print(run(['python3', ROOT / 'scripts/gen-xun-touch-firmware.py'], text=True), end='')
 c_recipe = json.loads((ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/bsd/DEVELOPMENT/kern_exec.o.json').read_text().strip().rstrip(','))
 c_cmd = []
@@ -410,6 +435,7 @@ touch_c_sources = [
     kit_file('GeniSpi.c'),
     kit_file('Fts8203.c'),
     kit_file('NvtProtocol.c'),
+    kit_file('CpuFreq.c'),
     ROOT / 'build/native-touch/XunTouchFirmware.c',
 ]
 touch_c_objs = []
@@ -436,7 +462,7 @@ require(code((keyevents / 'NativeKeyStoreEvents.o').read_bytes(), macho((keyeven
 run(['xcrun', 'ar', 'rcs', archive,
      late, OUT / 'original-bindings.o', OUT / 'LegacyDisplayProbe.o',
      keystore_obj, keyevents_late,
-     hid_obj, touch_obj, touch_probe_obj, buttons_obj, *touch_c_objs,
+     hid_obj, touch_obj, touch_probe_obj, buttons_obj, rpm_obj, *touch_c_objs,
      hid_dir / 'NativeHidInput.late.o', hid_dir / 'hid-original-bindings.o'])
 
 print(run(['python3', ROOT / 'scripts/build-arm-driver.py', 'NativeGOPPresenter'], text=True), end='')

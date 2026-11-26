@@ -17,7 +17,7 @@ enum {DomainSize = 0x1000, RegEnable = 0x000, RegLut = 0x110, LutStride = 32, Lu
 static const uint64_t domain_phys[2] = {0xf521000, 0xf523000};
 static volatile uint32_t *domains[2];
 static int request_parsed, requested[2];
-static uint32_t want;
+static uint32_t want = 1;
 
 // Appends piece to text and returns the new length, never past cap - 1.
 static unsigned append(char *text, unsigned cap, unsigned at, const char *piece) {
@@ -73,4 +73,9 @@ extern volatile uint32_t native_cpufreq_stage;
 void sheng_cpufreq_poll(void) {
   if (!boot_cpufreq_report(native_cpufreq_row, sizeof(native_cpufreq_row)))
     native_cpufreq_stage = 1;
+}
+
+int xun_cpufreq_apply(void) {
+  sheng_cpufreq_poll();
+  return (requested[0] ? 1 : 0) | (requested[1] ? 2 : 0);
 }

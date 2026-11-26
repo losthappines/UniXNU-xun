@@ -172,8 +172,6 @@ trust_cache_sha256 = [
 # through the bridge, which reads and writes no hardware. sheng-data-persist=2 keeps the 8 GiB packed Data seed writable
 # through the userdata store window (a seed above 2 GiB has no volatile backing).
 kernel_args = [
-  "-v",
-  "serial=3",
   "-progress",
   "debug=0x14e",
   "kt_fixed_zones=120",
@@ -189,7 +187,7 @@ kernel_args = [
   "ml-timeout-lock-panic-scale=40",
   "native-emmc-root=1",
   "sheng-data-persist=2",
-  "boot-progress=2",
+  "boot-progress=0",
   "boot-payload-release=1",
   "-no_corpses",
   "tb128fu-cpufreq=1",

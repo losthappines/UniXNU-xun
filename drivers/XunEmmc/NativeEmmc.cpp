@@ -68,6 +68,10 @@ volatile uint32_t native_verified_block_wrong_uuid_refused = 0;
 char native_verified_block_root_uuid[37] = {};
 
 extern const uint8_t verified_root_key[] __attribute__((weak_import));
+int xun_rpm_boost_clocks(void) __attribute__((weak_import));
+
+volatile uint32_t native_emmc_hs400 = 0;
+volatile uint32_t native_emmc_bus_mhz = 0;
 
 int printf(const char *format, ...) __printflike(1, 2);
 
@@ -301,31 +305,22 @@ IOReturn NativeEmmcBlock::doAsyncReadWrite(IOMemoryDescriptor *buffer, UInt64 bl
   __asm__ volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(t0));
 
   IOLockLock(ctrl->gate);
-  while (online && actual < totalBytes) {
-    const uint32_t remainSectors = static_cast<uint32_t>((totalBytes - actual) / kEmmcSectorBytes);
-    const uint32_t chunkSectors = (remainSectors > xun_emmc::kMaxChunkSectors)
-                                      ? xun_emmc::kMaxChunkSectors
-                                      : remainSectors;
-    const uint64_t lba = window.startLba + block + (actual / kEmmcSectorBytes);
-    if (!ctrl->sdhci.readSectors(lba, chunkSectors, ctrl->bounceBuf)) {
+  if (online && totalBytes) {
+    const uint32_t sectors = static_cast<uint32_t>(totalBytes / kEmmcSectorBytes);
+    const uint64_t lba = window.startLba + block;
+    if (ctrl->sdhci.readSectorsToDesc(lba, sectors, buffer, 0ULL, ctrl->bounceBuf)) {
+      actual = totalBytes;
+      native_ufs_block_reads = native_ufs_block_reads + sectors;
+      native_ufs_verified_blocks = native_ufs_verified_blocks + sectors;
+      result = kIOReturnSuccess;
+    } else {
       native_emmc_last_err_int = ctrl->sdhci.lastErrInt;
       native_emmc_last_int = ctrl->sdhci.lastIntStatus;
       native_emmc_adma_err = ctrl->sdhci.admaErr;
       native_emmc_read_errors = ctrl->sdhci.readErrors;
       native_ufs_block_failures = native_ufs_block_failures + 1U;
       result = kIOReturnIOError;
-      break;
     }
-    const uint32_t chunkBytes = chunkSectors * kEmmcSectorBytes;
-    if (buffer->writeBytes(actual, ctrl->bounceBuf, chunkBytes) != chunkBytes) {
-      native_ufs_block_failures = native_ufs_block_failures + 1U;
-      result = kIOReturnIOError;
-      break;
-    }
-    actual += chunkBytes;
-    native_ufs_block_reads = native_ufs_block_reads + chunkSectors;
-    native_ufs_verified_blocks = native_ufs_verified_blocks + chunkSectors;
-    result = kIOReturnSuccess;
   }
   native_emmc_reads = ctrl->sdhci.readOps;
   native_emmc_dma_fallbacks = ctrl->sdhci.dmaFallbacks;
@@ -418,12 +413,30 @@ bool NativeUfs::start(IOService *provider) {
   native_emmc_fallback_reinit = state->sdhci.fallbackReinitUsed ? 1U : 0U;
   native_emmc_host_version = state->sdhci.hostVersion;
   native_emmc_caps0 = state->sdhci.caps0;
+
+  uint32_t hs400Arg = 1;
+  PE_parse_boot_argn("xun-emmc-hs400", &hs400Arg, sizeof(hs400Arg));
+  if (hs400Arg != 0U) {
+    if (&xun_rpm_boost_clocks) (void)xun_rpm_boost_clocks();
+    if (state->sdhci.tryUpgradeHs400Es()) {
+      native_emmc_hs400 = 1U;
+      native_emmc_bus_mhz = state->sdhci.busFreqMHz;
+    } else {
+      native_emmc_hs400 = 0U;
+      native_emmc_bus_mhz = state->sdhci.busFreqMHz;
+      IOLog("NativeEmmc: HS400ES upgrade skipped/reverted (clk=%x hc=%x/%x); running safe HS/SDR\n",
+            static_cast<unsigned>(state->sdhci.clockCtrl),
+            static_cast<unsigned>(state->sdhci.hostCtrl),
+            static_cast<unsigned>(state->sdhci.hostCtrl2));
+    }
+  }
   native_emmc_vendor_spec = state->sdhci.vendorSpec;
-  IOLog("NativeEmmc: eMMC ready rca=%u sectors=%llu dma=%u adma64=%u cb=%d fb=%u hc=%x/%x clk=%x\n",
+  IOLog("NativeEmmc: eMMC ready rca=%u sectors=%llu dma=%u adma64=%u hs400=%u cb=%d fb=%u hc=%x/%x clk=%x\n",
         static_cast<unsigned>(state->sdhci.rca),
         static_cast<unsigned long long>(state->sdhci.sectorCount),
         static_cast<unsigned>(native_emmc_dma_enabled),
         static_cast<unsigned>(state->sdhci.useAdma64 ? 1U : 0U),
+        static_cast<unsigned>(native_emmc_hs400),
         static_cast<int>(native_emmc_smmu_cb),
         static_cast<unsigned>(native_emmc_fallback_reinit),
         static_cast<unsigned>(state->sdhci.hostCtrl),
@@ -790,9 +803,11 @@ extern "C" void native_ufs_progress_text(char *dst, size_t size) {
   const uint32_t hc2 = gCtrlState ? gCtrlState->sdhci.hostCtrl2 : 0U;
   const uint32_t clk = gCtrlState ? gCtrlState->sdhci.clockCtrl : 0U;
   snprintf(dst, size,
-           "CMD emmc st=%u dma=%u fb=%u/%llu cb=%d fsr=%x err=%x/%x hc=%x/%x clk=%x dmaMiB=%llu pioMiB=%llu",
+           "CMD emmc st=%u dma=%u hs400=%u/%uM fb=%u/%llu cb=%d fsr=%x err=%x/%x hc=%x/%x clk=%x dmaMiB=%llu pioMiB=%llu",
            static_cast<unsigned>(native_emmc_stage),
            static_cast<unsigned>(native_emmc_dma_enabled),
+           static_cast<unsigned>(native_emmc_hs400),
+           static_cast<unsigned>(native_emmc_bus_mhz),
            static_cast<unsigned>(native_emmc_fallback_reinit),
            static_cast<unsigned long long>(native_emmc_dma_fallbacks),
            static_cast<int>(native_emmc_smmu_cb),

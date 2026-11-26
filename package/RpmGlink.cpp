@@ -17,8 +17,10 @@ extern "C" {
 // The boot log's [rpm] rows (BootLog.c): the FIFO table and the indices found before the reset; the handshake and the newest
 // commands received; the newest request and its answer.
 char tb128fu_rpm_rows[3][120];
+volatile uint32_t native_xun_rpm_boost_done = 0;
 int tb128fu_rpm_open(void);
 int tb128fu_rpm_request(uint32_t set, uint32_t type, uint32_t id, uint32_t key, uint32_t value);
+int xun_rpm_boost_clocks(void);
 }
 
 namespace {
@@ -284,4 +286,62 @@ int tb128fu_rpm_request(uint32_t set, uint32_t type, uint32_t id, uint32_t key, 
     rows();
     IOLockUnlock(g.lock);
     return status;
+}
+
+namespace {
+struct RpmClkVote { uint32_t type, id, key, value; };
+constexpr uint32_t kBoostClk0 = 0x306b6c63, kBoostClk1 = 0x316b6c63, kBoostClk2 = 0x326b6c63, kBoostClka = 0x616b6c63;
+constexpr uint32_t kBoostCe = 0x6563, kBoostIpa = 0x617069, kBoostQup = 0x707571, kBoostMmxi = 0x69786d6d;
+constexpr uint32_t kBoostEnab = 0x62616e45, kBoostSwen = 0x6e657773, kBoostKhz = 0x007a484b;
+constexpr uint32_t kBoostRwcx = 0x78637772, kBoostRwmx = 0x786d7772, kBoostVlvl = 0x6c766c76;
+constexpr uint32_t kBoostIntMaxKhz = 2147484u;
+constexpr RpmClkVote kBoostClocks[] = {
+    {kBoostClk0, 0, kBoostEnab, 1}, {kBoostClk1, 1, kBoostKhz, kBoostIntMaxKhz},
+    {kBoostClk2, 0, kBoostKhz, kBoostIntMaxKhz}, {kBoostClk1, 2, kBoostKhz, kBoostIntMaxKhz},
+    {kBoostClk0, 1, kBoostEnab, 1}, {kBoostCe, 0, kBoostKhz, kBoostIntMaxKhz},
+    {kBoostIpa, 0, kBoostKhz, kBoostIntMaxKhz}, {kBoostQup, 0, kBoostKhz, kBoostIntMaxKhz},
+    {kBoostMmxi, 0, kBoostKhz, kBoostIntMaxKhz}, {kBoostMmxi, 1, kBoostKhz, kBoostIntMaxKhz},
+    {kBoostClk1, 0, kBoostKhz, kBoostIntMaxKhz}, {kBoostClk1, 5, kBoostKhz, kBoostIntMaxKhz},
+    {kBoostClka, 4, kBoostSwen, 1}, {kBoostClka, 5, kBoostSwen, 1},
+};
+volatile uint32_t gBoostState = 0;  // 0=idle, 1=running, 2=ok, 3=fail
+}  // namespace
+
+int xun_rpm_boost_clocks(void) {
+    uint32_t expected = 0;
+    if (!__atomic_compare_exchange_n(&gBoostState, &expected, 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        while (__atomic_load_n(&gBoostState, __ATOMIC_ACQUIRE) == 1u) {
+            IOSleep(10);
+        }
+        return __atomic_load_n(&gBoostState, __ATOMIC_ACQUIRE) == 2u ? 0 : -1;
+    }
+
+    int rc = tb128fu_rpm_open();
+    bool ok = false;
+    if (!rc) {
+        int cx0 = tb128fu_rpm_request(0, kBoostRwcx, 0, kBoostSwen, 1);
+        int cx1 = tb128fu_rpm_request(0, kBoostRwcx, 0, kBoostVlvl, 0x1a0);
+        int cx2 = tb128fu_rpm_request(1, kBoostRwcx, 0, kBoostVlvl, 0x1a0);
+        int mx0 = tb128fu_rpm_request(0, kBoostRwmx, 0, kBoostSwen, 1);
+        int mx1 = tb128fu_rpm_request(0, kBoostRwmx, 0, kBoostVlvl, 0x180);
+        int mx2 = tb128fu_rpm_request(1, kBoostRwmx, 0, kBoostVlvl, 0x180);
+        tb128fu_rpm_request(0, kBoostClk2, 0, kBoostKhz, 0x7fffffff);
+        tb128fu_rpm_request(1, kBoostClk2, 0, kBoostKhz, 0x7fffffff);
+
+        constexpr unsigned kCount = sizeof kBoostClocks / sizeof kBoostClocks[0];
+        constexpr unsigned kVotes = 2u * kCount;
+        unsigned acked = 0;
+        for (unsigned step = 0; step < kVotes; ++step) {
+            const RpmClkVote &c = kBoostClocks[step / 2];
+            if (tb128fu_rpm_request(step % 2, c.type, c.id, c.key, c.value) == 0) ++acked;
+        }
+        if (acked == kVotes) {
+            tb128fu_rpm_request(1, kBoostClk0, 2, kBoostEnab, 1);
+            tb128fu_rpm_request(0, kBoostClk0, 2, kBoostEnab, 1);
+        }
+        ok = (!cx0 && !cx1 && !cx2 && !mx0 && !mx1 && !mx2 && acked == kVotes);
+    }
+    native_xun_rpm_boost_done = ok ? 1u : 2u;
+    __atomic_store_n(&gBoostState, ok ? 2u : 3u, __ATOMIC_RELEASE);
+    return ok ? 0 : (rc ? rc : -5);
 }

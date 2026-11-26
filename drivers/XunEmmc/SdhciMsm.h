@@ -13,12 +13,15 @@ namespace xun_emmc {
 
 constexpr uint64_t kSdhci1CqhciBase = 0x04745000ULL;
 constexpr uint64_t kSdhci1CqhciSize = 0x00001000ULL;
-// SM6225 (khaje) GCC base is 0x01400000; SDCC1 CBCR block is at +0x38000.
+// SM6225 (khaje) GCC base is 0x01400000; SDCC1 CBCR/RCG block is at +0x38000,
+// APCS clock branch vote is at +0x79000, and GPLL6 is at +0x06000.
 constexpr uint64_t kGccSdcc1Base    = 0x01438000ULL;
 constexpr uint64_t kGccSdcc1Size    = 0x00001000ULL;
+constexpr uint64_t kGccVoteBase     = 0x01479000ULL;
+constexpr uint64_t kGccGpll6Base    = 0x01406000ULL;
 
 constexpr uint32_t kEmmcSectorBytes = 512U;
-constexpr uint32_t kMaxChunkSectors = 512U;  // 256 KiB per transfer (4x 64 KiB ADMA2 descriptors)
+constexpr uint32_t kMaxChunkSectors = 2048U;  // 1 MiB per transfer (16x 64 KiB ADMA2 descriptors)
 
 // Standard SDHCI registers (sdhci@4744000)
 enum SdhciReg : uint32_t {
@@ -59,12 +62,22 @@ enum SdhciMsmV5Reg : uint32_t {
   kCoreDllConfig     = 0x200,
   kCoreDllStatus     = 0x208,
   kCoreVendorSpec    = 0x20C,
+  kCoreDdr200Cfg     = 0x224,
   kCorePwrctlStatus  = 0x240,
   kCorePwrctlMask    = 0x244,
   kCorePwrctlClear   = 0x248,
   kCorePwrctlCtl     = 0x24C,
   kCoreVendorSpec3   = 0x250,
+  kCoreDllConfig2    = 0x254,
+  kCoreDllConfig3    = 0x258,
+  kCoreDdrConfig     = 0x25C,
+  kCoreDllUsrCtl     = 0x388,
 };
+
+// xun dtbo/vendor_boot (qcom,dll-hsr-list for SM6225)
+constexpr uint32_t kXunHsrDllConfig  = 0x000F642CU;
+constexpr uint32_t kXunHsrDllUsrCtl  = 0x2C010800U;
+constexpr uint32_t kXunHsrDdrConfig  = 0x80040868U;
 
 // Present state bits
 constexpr uint32_t kStateCmdInhibit      = 1U << 0;
@@ -156,12 +169,16 @@ struct SdhciController {
   IOMemoryMap *hcMap = nullptr;
   IOMemoryMap *cqhciMap = nullptr;
   IOMemoryMap *gccMap = nullptr;
+  IOMemoryMap *gccVoteMap = nullptr;
+  IOMemoryMap *gpll6Map = nullptr;
   IOBufferMemoryDescriptor *dmaDesc = nullptr;
   IOBufferMemoryDescriptor *admaDesc = nullptr;
 
   uintptr_t base = 0;
   uintptr_t cqhciBase = 0;
   uintptr_t gccBase = 0;
+  uintptr_t gccVoteBase = 0;
+  uintptr_t gpll6Base = 0;
 
   uint8_t *dmaBuf = nullptr;
   uint64_t dmaPhys = 0;
@@ -171,8 +188,10 @@ struct SdhciController {
   bool initialized = false;
   bool useDma = false;
   bool useAdma64 = false;
+  bool hs400Active = false;
   bool highCapacity = true;
   bool fallbackReinitUsed = false;
+  uint32_t busFreqMHz = 0;
 
   uint16_t rca = 1;
   uint32_t sectorCount = 0;
@@ -222,6 +241,8 @@ struct SdhciController {
   void release() {
     if (dmaDesc) { dmaDesc->release(); dmaDesc = nullptr; dmaBuf = nullptr; }
     if (admaDesc) { admaDesc->release(); admaDesc = nullptr; admaBuf = nullptr; }
+    if (gpll6Map) { gpll6Map->release(); gpll6Map = nullptr; gpll6Base = 0; }
+    if (gccVoteMap) { gccVoteMap->release(); gccVoteMap = nullptr; gccVoteBase = 0; }
     if (gccMap) { gccMap->release(); gccMap = nullptr; gccBase = 0; }
     if (cqhciMap) { cqhciMap->release(); cqhciMap = nullptr; cqhciBase = 0; }
     if (hcMap) { hcMap->release(); hcMap = nullptr; base = 0; }
@@ -268,6 +289,62 @@ struct SdhciController {
     // gcc-khaje.c: GCC_SDCC1_AHB_CBCR = +0x08, GCC_SDCC1_APPS_CBCR = +0x04
     enableCbcr(0x08U);
     enableCbcr(0x04U);
+
+    auto mapOne = [](uint64_t phys, IOMemoryMap **outMap, uintptr_t *outBase) {
+      IOMemoryDescriptor *d = IOMemoryDescriptor::withPhysicalAddress(phys, 0x1000U, kIODirectionInOut);
+      if (!d) return;
+      *outMap = d->map(kIOMapAnywhere | kIOMapInhibitCache);
+      d->release();
+      if (*outMap) *outBase = static_cast<uintptr_t>((*outMap)->getVirtualAddress());
+    };
+    mapOne(kGccVoteBase, &gccVoteMap, &gccVoteBase);
+    mapOne(kGccGpll6Base, &gpll6Map, &gpll6Base);
+  }
+
+  bool setGccSdcc1AppClock(uint32_t cfgVal) {
+    if (!gccBase) return false;
+    volatile uint32_t *cmd = reinterpret_cast<volatile uint32_t *>(gccBase + 0x28U);
+    volatile uint32_t *cfg = reinterpret_cast<volatile uint32_t *>(gccBase + 0x2CU);
+    volatile uint32_t *mReg = reinterpret_cast<volatile uint32_t *>(gccBase + 0x30U);
+    volatile uint32_t *nReg = reinterpret_cast<volatile uint32_t *>(gccBase + 0x34U);
+    volatile uint32_t *dReg = reinterpret_cast<volatile uint32_t *>(gccBase + 0x38U);
+    if ((cfgVal & (3U << 12)) == 0U) {
+      *mReg = 0U;
+      *nReg = 0U;
+      *dReg = 0U;
+    }
+    *cfg = cfgVal;
+    __asm__ volatile("dsb sy" ::: "memory");
+    *cmd = (*cmd) | 1U;
+    __asm__ volatile("dsb sy" ::: "memory");
+    for (uint32_t t = 0; t < 10000U; ++t) {
+      if ((*cmd & 1U) == 0U) return true;
+      IODelay(1);
+    }
+    return false;
+  }
+
+  bool enableGpll6Even() {
+    if (!gccVoteBase || !gpll6Base) return false;
+    volatile uint32_t *vote = reinterpret_cast<volatile uint32_t *>(gccVoteBase);
+    *vote = (*vote) | (1U << 0) | (1U << 6);  // GPLL0 + GPLL6
+    __asm__ volatile("dsb sy" ::: "memory");
+    // CLK_ALPHA_PLL_TYPE_LUCID: +0x00 MODE (bit 31 PLL_LOCK_DET), +0x0C USER_CTL (bit 1 PLLOUT_EVEN)
+    volatile uint32_t *mode = reinterpret_cast<volatile uint32_t *>(gpll6Base + 0x00U);
+    volatile uint32_t *userCtl = reinterpret_cast<volatile uint32_t *>(gpll6Base + 0x0CU);
+    bool locked = false;
+    for (uint32_t t = 0; t < 500U; ++t) {
+      if (*mode & (1U << 31)) { locked = true; break; }
+      IODelay(2);
+    }
+    if (!locked) return false;
+    uint32_t uc = *userCtl;
+    if ((uc & (1U << 1)) == 0U) {
+      *userCtl = uc | (1U << 1);
+      __asm__ volatile("dsb sy" ::: "memory");
+      IODelay(10);
+    }
+    return true;
   }
 
   void ackPendingPwrctl() {
@@ -836,7 +913,169 @@ struct SdhciController {
       return false;
     }
     invalidateDataCacheRange(dmaBuf, bytes);
-    memcpy(dst, dmaBuf, bytes);
+    if (dst) memcpy(dst, dmaBuf, bytes);
+    return true;
+  }
+
+  bool readSectorsToDesc(uint64_t lba, uint32_t count, IOMemoryDescriptor *desc,
+                         uint64_t descOffset, uint8_t *pioFallbackBuf) {
+    if (!initialized || !desc) return false;
+    if (!count) return true;
+    if (lba >= sectorCount || count > sectorCount - lba) return false;
+
+    uint32_t done = 0;
+    while (done < count) {
+      const uint32_t chunk = (count - done > kMaxChunkSectors) ? kMaxChunkSectors : (count - done);
+      const uint32_t chunkBytes = chunk * kEmmcSectorBytes;
+      bool ok = false;
+      bool usedDma = false;
+      if (useDma) {
+        ok = readChunkAdma2(lba + done, chunk, nullptr);
+        if (ok) {
+          usedDma = true;
+          if (desc->writeBytes(descOffset + static_cast<uint64_t>(done) * kEmmcSectorBytes,
+                               dmaBuf, chunkBytes) != chunkBytes) {
+            ++readErrors;
+            return false;
+          }
+        } else {
+          ++dmaFallbacks;
+          useDma = false;
+          IOLog("NativeEmmc: ADMA2 failed int=0x%x err=0x%x adma=0x%x cmd=%u; falling back to PIO\n",
+                lastIntStatus, lastErrInt, admaErr, lastCmd);
+        }
+      }
+      if (!ok) {
+        if (!pioFallbackBuf) { ++readErrors; return false; }
+        ok = readChunkPio(lba + done, chunk, pioFallbackBuf);
+        if (!ok && chunk > 1U) {
+          ok = true;
+          for (uint32_t s = 0; s < chunk; ++s) {
+            if (!readChunkPio(lba + done + s, 1U, pioFallbackBuf + s * kEmmcSectorBytes)) {
+              ok = false;
+              break;
+            }
+          }
+        }
+        if (ok && desc->writeBytes(descOffset + static_cast<uint64_t>(done) * kEmmcSectorBytes,
+                                   pioFallbackBuf, chunkBytes) != chunkBytes) {
+          ++readErrors;
+          return false;
+        }
+      }
+      if (!ok) {
+        ++readErrors;
+        return false;
+      }
+      if (usedDma) bytesDma += chunkBytes;
+      else bytesPio += chunkBytes;
+      done += chunk;
+    }
+    ++readOps;
+    return true;
+  }
+
+  bool tryUpgradeHs400Es() {
+    if (!initialized || hs400Active || !gccBase || !gccVoteBase || !gpll6Base) return false;
+    uint8_t extCsd[512] = {};
+    if (!readExtCsd(extCsd)) return false;
+    // Check DEVICE_TYPE (EXT_CSD[196] bit 6: HS400 1.8V) and STROBE_SUPPORT (EXT_CSD[184] bit 0).
+    if ((extCsd[196] & 0x40U) == 0U || (extCsd[184] & 0x01U) == 0U) return false;
+
+    uint8_t refSector[kEmmcSectorBytes] = {};
+    if (!readSectors(0ULL, 1U, refSector)) return false;
+    if (!enableGpll6Even()) return false;
+
+    const uint32_t origCfgRcgr = *reinterpret_cast<volatile uint32_t *>(gccBase + 0x2CU);
+    const uint8_t origHostCtrl = r8(kHostControl);
+    const uint16_t origHostCtrl2 = r16(kHostControl2);
+    const uint16_t origClkCtrl = r16(kClockControl);
+    const uint32_t origVendorSpec = r32(kCoreVendorSpec);
+    const uint32_t origVendorSpec3 = r32(kCoreVendorSpec3);
+
+    auto revertSafe = [&]() {
+      w32(kCoreDdr200Cfg, r32(kCoreDdr200Cfg) & ~(1U << 1));
+      w32(kCoreDllConfig2, r32(kCoreDllConfig2) & ~1U);
+      setGccSdcc1AppClock(origCfgRcgr);
+      w32(kCoreVendorSpec, origVendorSpec);
+      w32(kCoreVendorSpec3, origVendorSpec3);
+      w16(kHostControl2, origHostCtrl2);
+      w8(kHostControl, origHostCtrl);
+      w16(kClockControl, origClkCtrl);
+      if (reinitEmmcFallback() && useDma) {
+        w8(kHostControl, (r8(kHostControl) & ~kHostDmaMask) |
+                             (useAdma64 ? kHostDmaAdma64 : kHostDmaAdma32));
+        hostCtrl = r8(kHostControl);
+      }
+      hs400Active = false;
+      busFreqMHz = 50U;
+    };
+
+    // Step 1: Switch to safe 50 MHz High-Speed (P_GPLL0_OUT_EVEN 300 MHz / 6 -> CFG_RCGR=0x020B), div=0
+    w32(kCoreVendorSpec3, r32(kCoreVendorSpec3) & ~(1U << 3));  // clear CORE_PWRSAVE_DLL
+    w32(kCoreVendorSpec, (r32(kCoreVendorSpec) & ~((3U << 8) | (7U << 19) | (1U << 18) | (1U << 1))) | (2U << 8));
+    if (!setGccSdcc1AppClock(0x020BU) || !setSdClock(0U)) { revertSafe(); return false; }
+
+    // Switch card: HS (0x01) -> 8-bit DDR + Enhanced Strobe (0x86) -> HS400 (0x03)
+    if (!switchExtCsd(185U, 1U)) { revertSafe(); return false; }
+    w8(kHostControl, r8(kHostControl) | kHostHighSpeed);
+    if (!switchExtCsd(183U, 0x86U)) { revertSafe(); return false; }
+    w8(kHostControl, (r8(kHostControl) & ~kHost4Bit) | kHost8Bit);
+    if (!switchExtCsd(185U, 3U)) { revertSafe(); return false; }
+
+    // Step 2: Configure HC for HS400 and bump GCC SDCC1 APPS clock to 384 MHz (192 MHz DDR)
+    w32(kCoreVendorSpec,
+        (r32(kCoreVendorSpec) & ~((3U << 8) | (7U << 19) | (1U << 1))) |
+            (3U << 8) | (6U << 19) | (1U << 18));
+    w16(kHostControl2, static_cast<uint16_t>((r16(kHostControl2) & ~0x0007U) | 0x0003U | kHost2Vdd180));
+    if (!setGccSdcc1AppClock(0x0401U) || !setSdClock(0U)) { revertSafe(); return false; }
+
+    // Step 3: CM DLL init + SDC4 calibration (verbatim from SM6225 sdhci-msm.c + xun HSR)
+    w32(kCoreDllConfig, r32(kCoreDllConfig) | (1U << 30));
+    w32(kCoreDllConfig, r32(kCoreDllConfig) | (1U << 29));
+    w32(kCoreDdrConfig, kXunHsrDdrConfig);
+    w32(kCoreDllConfig, kXunHsrDllConfig | (1U << 30) | (1U << 29));
+    w32(kCoreDllUsrCtl, kXunHsrDllUsrCtl);
+    IODelay(60);
+
+    w32(kCoreDllConfig, r32(kCoreDllConfig) & ~(1U << 30));
+    w32(kCoreDllConfig, r32(kCoreDllConfig) & ~(1U << 29));
+    w32(kCoreDllConfig, r32(kCoreDllConfig) | (1U << 30));
+    w32(kCoreDllConfig, r32(kCoreDllConfig) & ~(1U << 30));
+    w32(kCoreDllConfig2, r32(kCoreDllConfig2) & ~((1U << 21) | 1U));
+    IODelay(50);
+
+    w32(kCoreDllConfig, r32(kCoreDllConfig) | (1U << 18) | (1U << 16));
+    bool dllLocked = false;
+    for (uint32_t t = 0; t < 200U; ++t) {
+      if (r32(kCoreDllStatus) & (1U << 7)) { dllLocked = true; break; }
+      IODelay(1);
+    }
+    if (!dllLocked) { revertSafe(); return false; }
+
+    w32(kCoreDdrConfig, kXunHsrDdrConfig);
+    w32(kCoreDdr200Cfg, r32(kCoreDdr200Cfg) | (1U << 1));  // CORE_CMDIN_RCLK_EN (Enhanced Strobe)
+    w32(kCoreDllConfig2, r32(kCoreDllConfig2) | 1U);      // CORE_DDR_CAL_EN
+    bool ddrLocked = false;
+    for (uint32_t t = 0; t < 1000U; ++t) {
+      if (r32(kCoreDllStatus) & (1U << 11)) { ddrLocked = true; break; }
+      IODelay(1);
+    }
+    if (!ddrLocked) { revertSafe(); return false; }
+
+    // Step 4: Verify live LBA 0 read at 384 MHz matches baseline
+    uint8_t checkSector[kEmmcSectorBytes] = {};
+    if (!readSectors(0ULL, 1U, checkSector) || memcmp(refSector, checkSector, kEmmcSectorBytes) != 0) {
+      revertSafe();
+      return false;
+    }
+
+    hs400Active = true;
+    busFreqMHz = 384U;
+    hostCtrl = r8(kHostControl);
+    hostCtrl2 = r16(kHostControl2);
+    clockCtrl = r16(kClockControl);
+    vendorSpec = r32(kCoreVendorSpec);
     return true;
   }
 
