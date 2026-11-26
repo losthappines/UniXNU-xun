@@ -55,6 +55,7 @@ if not board_kernel.exists():
     stub_c.write_text(
         'void native_legacy_display_probe(void) {}\n'
         'void native_legacy_display_late_probe(void) {}\n'
+        'int xun_rpm_boost_clocks(void) { return 0; }\n'
     )
     sdk = run(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], text=True).strip()
     run(['xcrun', 'clang', '-target', 'arm64-apple-ios17.0', '-isysroot', sdk,
@@ -435,7 +436,6 @@ touch_c_sources = [
     kit_file('GeniSpi.c'),
     kit_file('Fts8203.c'),
     kit_file('NvtProtocol.c'),
-    kit_file('CpuFreq.c'),
     ROOT / 'build/native-touch/XunTouchFirmware.c',
 ]
 touch_c_objs = []
