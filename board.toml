@@ -187,7 +187,7 @@ kernel_args = [
   "ml-timeout-lock-panic-scale=40",
   "native-emmc-root=1",
   "sheng-data-persist=2",
-  "boot-progress=0",
+  "boot-progress=2",
   "boot-payload-release=1",
   "-no_corpses",
   "tb128fu-cpufreq=1",
