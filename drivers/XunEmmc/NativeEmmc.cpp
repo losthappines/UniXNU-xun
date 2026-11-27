@@ -414,7 +414,7 @@ bool NativeUfs::start(IOService *provider) {
   native_emmc_host_version = state->sdhci.hostVersion;
   native_emmc_caps0 = state->sdhci.caps0;
 
-  uint32_t hs400Arg = 1;
+  uint32_t hs400Arg = 0;
   PE_parse_boot_argn("xun-emmc-hs400", &hs400Arg, sizeof(hs400Arg));
   if (hs400Arg != 0U) {
     if (&xun_rpm_boost_clocks) (void)xun_rpm_boost_clocks();

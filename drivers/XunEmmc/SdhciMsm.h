@@ -192,6 +192,7 @@ struct SdhciController {
   bool highCapacity = true;
   bool fallbackReinitUsed = false;
   uint32_t busFreqMHz = 0;
+  uint32_t maxDmaChunkSectors = 0;
 
   uint16_t rca = 1;
   uint32_t sectorCount = 0;
@@ -239,8 +240,9 @@ struct SdhciController {
   }
 
   void release() {
-    if (dmaDesc) { dmaDesc->release(); dmaDesc = nullptr; dmaBuf = nullptr; }
-    if (admaDesc) { admaDesc->release(); admaDesc = nullptr; admaBuf = nullptr; }
+    if (dmaDesc) { dmaDesc->release(); dmaDesc = nullptr; dmaBuf = nullptr; dmaPhys = 0; }
+    if (admaDesc) { admaDesc->release(); admaDesc = nullptr; admaBuf = nullptr; admaPhys = 0; }
+    maxDmaChunkSectors = 0;
     if (gpll6Map) { gpll6Map->release(); gpll6Map = nullptr; gpll6Base = 0; }
     if (gccVoteMap) { gccVoteMap->release(); gccVoteMap = nullptr; gccVoteBase = 0; }
     if (gccMap) { gccMap->release(); gccMap = nullptr; gccBase = 0; }
@@ -627,41 +629,47 @@ struct SdhciController {
   }
 
   bool allocateDmaBuffers() {
-    if (dmaDesc && admaDesc) return true;
+    if (dmaDesc && admaDesc && maxDmaChunkSectors) return true;
     // Keep DMA buffers page-aligned below 4 GiB so both 32-bit and 64-bit ADMA2 work cleanly.
     const uint64_t mask = 0x00000000FFFFF000ULL;
     const IOOptionBits bufOpts =
         static_cast<IOOptionBits>(kIODirectionInOut) |
         static_cast<IOOptionBits>(kIOMemoryPhysicallyContiguous);
-    dmaDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(
-        kernel_task, bufOpts,
-        kMaxChunkSectors * kEmmcSectorBytes, mask);
-    admaDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(
-        kernel_task, bufOpts,
-        4096U, mask);
-    if (!dmaDesc || !admaDesc ||
-        dmaDesc->prepare() != kIOReturnSuccess ||
-        admaDesc->prepare() != kIOReturnSuccess) {
-      if (dmaDesc) { dmaDesc->release(); dmaDesc = nullptr; }
-      if (admaDesc) { admaDesc->release(); admaDesc = nullptr; }
-      return false;
+    static constexpr uint32_t kCandidates[] = {2048U, 1024U, 512U, 256U, 128U};
+    for (uint32_t cand : kCandidates) {
+      IOBufferMemoryDescriptor *dDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(
+          kernel_task, bufOpts, cand * kEmmcSectorBytes, mask);
+      IOBufferMemoryDescriptor *aDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(
+          kernel_task, bufOpts, 4096U, mask);
+      bool dPrep = dDesc && (dDesc->prepare() == kIOReturnSuccess);
+      bool aPrep = aDesc && (aDesc->prepare() == kIOReturnSuccess);
+      if (dPrep && aPrep) {
+        IOByteCount dmaSegLen = 0, admaSegLen = 0;
+        const uint64_t dPhys = dDesc->getPhysicalSegment(0, &dmaSegLen);
+        const uint64_t aPhys = aDesc->getPhysicalSegment(0, &admaSegLen);
+        uint8_t *dBuf = static_cast<uint8_t *>(dDesc->getBytesNoCopy());
+        uint8_t *aBuf = static_cast<uint8_t *>(aDesc->getBytesNoCopy());
+        if (dPhys && aPhys && dBuf && aBuf &&
+            (dPhys >> 32) == 0ULL && (aPhys >> 32) == 0ULL &&
+            dmaSegLen >= static_cast<IOByteCount>(cand * kEmmcSectorBytes) &&
+            admaSegLen >= 4096U) {
+          dmaDesc = dDesc;
+          admaDesc = aDesc;
+          dmaPhys = dPhys;
+          admaPhys = aPhys;
+          dmaBuf = dBuf;
+          admaBuf = aBuf;
+          maxDmaChunkSectors = cand;
+          return true;
+        }
+      }
+      if (dPrep) dDesc->complete();
+      if (aPrep) aDesc->complete();
+      if (dDesc) dDesc->release();
+      if (aDesc) aDesc->release();
     }
-    IOByteCount dmaSegLen = 0, admaSegLen = 0;
-    dmaPhys = dmaDesc->getPhysicalSegment(0, &dmaSegLen);
-    admaPhys = admaDesc->getPhysicalSegment(0, &admaSegLen);
-    dmaBuf = static_cast<uint8_t *>(dmaDesc->getBytesNoCopy());
-    admaBuf = static_cast<uint8_t *>(admaDesc->getBytesNoCopy());
-    if (!dmaPhys || !admaPhys || !dmaBuf || !admaBuf ||
-        (dmaPhys >> 32) || (admaPhys >> 32) ||
-        dmaSegLen < static_cast<IOByteCount>(kMaxChunkSectors * kEmmcSectorBytes) ||
-        admaSegLen < 4096U) {
-      dmaDesc->complete();
-      admaDesc->complete();
-      dmaDesc->release(); dmaDesc = nullptr; dmaBuf = nullptr; dmaPhys = 0;
-      admaDesc->release(); admaDesc = nullptr; admaBuf = nullptr; admaPhys = 0;
-      return false;
-    }
-    return true;
+    maxDmaChunkSectors = 0;
+    return false;
   }
 
   bool init(IOService *provider, bool enableDma) {
@@ -835,7 +843,7 @@ struct SdhciController {
   }
 
   bool readChunkAdma2(uint64_t lba, uint32_t nblks, uint8_t *dst) {
-    if (!useDma || !dmaBuf || !admaBuf || !nblks || nblks > kMaxChunkSectors) return false;
+    if (!useDma || !dmaBuf || !admaBuf || !nblks || !maxDmaChunkSectors || nblks > maxDmaChunkSectors) return false;
     if (!waitStateClear(kStateCmdInhibit | kStateDatInhibit, 200000U)) {
       resetLines(0x06U);
       return false;
@@ -925,7 +933,8 @@ struct SdhciController {
 
     uint32_t done = 0;
     while (done < count) {
-      const uint32_t chunk = (count - done > kMaxChunkSectors) ? kMaxChunkSectors : (count - done);
+      const uint32_t maxChunk = (useDma && maxDmaChunkSectors) ? maxDmaChunkSectors : kMaxChunkSectors;
+      const uint32_t chunk = (count - done > maxChunk) ? maxChunk : (count - done);
       const uint32_t chunkBytes = chunk * kEmmcSectorBytes;
       bool ok = false;
       bool usedDma = false;
@@ -979,6 +988,11 @@ struct SdhciController {
     if (!initialized || hs400Active || !gccBase || !gccVoteBase || !gpll6Base) return false;
     uint8_t extCsd[512] = {};
     if (!readExtCsd(extCsd)) return false;
+    if ((extCsd[185] & 0x0FU) == 3U) {
+      hs400Active = true;
+      busFreqMHz = 384U;
+      return true;
+    }
     // Check DEVICE_TYPE (EXT_CSD[196] bit 6: HS400 1.8V) and STROBE_SUPPORT (EXT_CSD[184] bit 0).
     if ((extCsd[196] & 0x40U) == 0U || (extCsd[184] & 0x01U) == 0U) return false;
 
@@ -1087,7 +1101,8 @@ struct SdhciController {
     uint8_t *out = static_cast<uint8_t *>(dst);
     uint32_t done = 0;
     while (done < count) {
-      const uint32_t chunk = (count - done > kMaxChunkSectors) ? kMaxChunkSectors : (count - done);
+      const uint32_t maxChunk = (useDma && maxDmaChunkSectors) ? maxDmaChunkSectors : kMaxChunkSectors;
+      const uint32_t chunk = (count - done > maxChunk) ? maxChunk : (count - done);
       bool ok = false;
       bool usedDma = false;
       if (useDma) {
